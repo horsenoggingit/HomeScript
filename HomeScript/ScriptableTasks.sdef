@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+
+<dictionary>
+    <suite name="HomeScript suite" code="MYAP" description="Standard terms for HomeScript scripting">
+        <command name="command 2" code="MYAPcmd2" description="Performs command 2 with arguments">
+            <cocoa class="HomeScript.MyDoThingWithArgumentCommand"/>
+            <direct-parameter type="list of text" optional="no" description="the arguments"/>
+        </command>
+        <command name="track" code="HSPTtrck" description="Tracks a characteristic">
+            <cocoa class="HomeScript.AccessoryFinderScripter"/>
+            <parameter name="characteristic" type="text" code="char" description="The characteristic name."/>
+            <parameter name="accessory" type="text" code="acce" description="The accessory name."/>
+            <parameter name="room" type="text" code="room" description="The accessory room."/>
+            <parameter name="home" type="text" code="hom1" description="The accessory home."/>
+        </command>
+        <command name="browse number" code="HSPTtget" description="Gets a characteristic Value">
+            <cocoa class="HomeScript.AccessoryGetterScripter"/>
+            <parameter name="characteristic" type="text" code="cha1" description="The characteristic name."/>
+            <parameter name="accessory" type="text" code="acc1" description="The accessory name."/>
+            <parameter name="room" type="text" code="roo1" description="The accessory room."/>
+            <parameter name="home" type="text" code="hom2" description="The accessory home."/>
+            <result type="number" description="The processed string."/>
+        </command>
+        <command name="write number" code="HSPTwrit" description="Sets a characteristic Value">
+            <cocoa class="HomeScript.AccessorySetterScripter"/>
+            <direct-parameter type="number" code="wrnm" description="The characteristic name."/>
+            <parameter name="to characteristic" type="text" code="cha3" description="The characteristic name."/>
+            <parameter name="accessory" type="text" code="acc3" description="The accessory name."/>
+            <parameter name="room" type="text" code="roo3" description="The accessory room."/>
+            <parameter name="home" type="text" code="hom3" description="The accessory home."/>
+            <result type="number" description="The processed string."/>
+        </command>
+        <command name="command 1" code="MYAPcmd1" description="Performs command 1">
+            <cocoa class="HomeScript.MyDoThingCommand"/>
+        </command>
+        <class name="application" code="capp">
+            <cocoa class="NSApplication"/>
+            <access-group identifier="*" access="rw"/>
+            <property name="saved number" code="snum" type="integer" access="rw" description="the currently exposed number">
+                <cocoa key="savedNumber"/>
+                </property>
+            <property name="saved bool" code="sbol" type="boolean" access="r" description="the currently exposed bool">
+                <cocoa key="savedBool"/>
+                </property>
+            <property name="saved list" code="slst" type="list of text" access="r" description="the currently exposed list">
+                <cocoa key="savedList"/>
+                </property>
+            <property name="saved string" code="sstr" type="text" access="rw" description="the currently exposed string">
+                <cocoa key="savedString"/>
+            </property>
+        <property name="version" code="vers" type="text" access="r" description="the version of the application">
+            <access-group identifier="*"/>
+        </property>
+        </class>
+    </suite>
+</dictionary>
