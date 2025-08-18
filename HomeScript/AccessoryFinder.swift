@@ -7,8 +7,10 @@
 
 import Foundation
 import HomeKit
+import os
 
-struct AFAccessoryNameContainer : Hashable {
+struct AFAccessoryNameContainer : Hashable, CustomStringConvertible {
+    
     init(name: String, home: String, room: String?) {
         self.name = name
         self.home = home
@@ -18,6 +20,10 @@ struct AFAccessoryNameContainer : Hashable {
     let name : String
     let home : String
     let room : String?
+    
+    var description: String {
+        "accessory:'\(self.name)' room:'\(self.room ?? "<none>")' home:'\(self.home)'"
+    }
 }
 
 @MainActor
@@ -25,6 +31,7 @@ class AccessoryFinder {
     static let shared = AccessoryFinder()
     
     let homeManager = HSKHomeManager()
+    let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "AccessoryFinder")
     var trackedAccessories = [AFAccessoryNameContainer : HMAccessory]()
     var dataStore = [AFAccessoryNameContainer : [String: Any?]]()
     var lastWriteError : Error?
@@ -55,10 +62,26 @@ class AccessoryFinder {
         return innerOptiona
     }
     
+    func readStoredCharacteristicsForAccessory(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> [String]? {
+        let accessoryValues = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]
+        guard let accessoryValues = accessoryValues else {
+            // means there is no information available
+            return nil
+        }
+        return accessoryValues.keys.sorted()
+    }
+    
+    func readTrackedAccessories() -> [[String]] {
+        let x = dataStore.keys.map { keyContainer in
+            [keyContainer.name, keyContainer.room ?? "", keyContainer.home]
+        }
+        return x
+    }
+    
     func trackCharacteristicNamed(name : String, accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> Any? {
         let value = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]?[name]
         if value == nil {
-            print("Characteristing not found. Starting tracking... (\(name) \(accessoryName) \(inRoomNamed) \(inHomeNamed))")
+            logger.info("Characteristing not found. Starting tracking... (\(name) \(accessoryName) \(inRoomNamed) \(inHomeNamed))")
             Task {
                 await trackCharacteristicsInAccessoryNamed(accessoryName, inRoomNamed: inRoomNamed, inHomeNamed: inHomeNamed)
             }
@@ -101,6 +124,7 @@ class AccessoryFinder {
                     } else {
                         self.failedWriteValues[keyName] = [name: value]
                     }
+                    self.logger.error("Failed to write value \(String(describing:value)) to characteristic \(name) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed): \(err?.localizedDescription ?? "no error description")")
                     self.lastWriteError = err
                     return
                 }
@@ -113,7 +137,7 @@ class AccessoryFinder {
                 } else {
                     self.dataStore[keyName] = [name: value]
                 }
-                print("SET characteristic \(name) value \(String(describing:value)) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed)")
+                self.logger.info("SET characteristic \(name) value \(String(describing:value)) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed)")
             }
             return true
         }
@@ -130,7 +154,7 @@ class AccessoryFinder {
         }
         await self.homeManager.addNewTargetHomeName(inHomeNamed, cont: contuation)
         
-        print("Looking for home \(inHomeNamed)")
+        logger.info("Looking for home \(inHomeNamed)")
         var targetHome : HMHome?
         for await event in stream {
             switch event {
@@ -138,7 +162,7 @@ class AccessoryFinder {
                 targetHome = homes.first(where: { $0.name == inHomeNamed })
             }
             if targetHome != nil {
-                print("Found home \(inHomeNamed)")
+                logger.info("Found home \(inHomeNamed)")
                 break
             }
         }
@@ -153,7 +177,7 @@ class AccessoryFinder {
         guard let homeContuation else {
             fatalError("contuation nil")
         }
-        print("Looking for accessory \(name) in room \(inRoomNamed) in home \(inHome.name)")
+        logger.info("Looking for accessory \(name) in room \(inRoomNamed) in home \(inHome.name)")
 
         var targetAccessory : HMAccessory?
         let home = await HSKHome(home: inHome, eventContinuation: homeContuation)
@@ -161,7 +185,7 @@ class AccessoryFinder {
         for await event in homeStream {
             switch event {
             case .targetAccessoryUpdated(let hkaccessory):
-                print("Found for accessory \(name) in room \(inRoomNamed) in home \(inHome.name)")
+                logger.info("Found for accessory \(name) in room \(inRoomNamed) in home \(inHome.name)")
                 targetAccessory = hkaccessory
             }
             if targetAccessory != nil {
@@ -173,10 +197,10 @@ class AccessoryFinder {
     
     func trackCharacteristicsInAccessoryNamed(_ name: String, inRoomNamed: String, inHomeNamed: String) async {
         let keyName = AFAccessoryNameContainer(name: name, home: inHomeNamed, room: inRoomNamed)
-        print("Starting track of \(keyName)")
+        logger.info("Starting track of \(keyName)")
         
         guard trackedAccessories[keyName] == nil else {
-            print("Accessory already tracked of \(keyName)")
+            logger.info("Accessory already tracked of \(keyName)")
             return
         }
         
@@ -189,7 +213,7 @@ class AccessoryFinder {
         }
         
         if let tracked = trackedAccessories[keyName], tracked == targetAccessory {
-            print("Already tracking accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+            logger.info("Already tracking accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
             return
         }
         
@@ -204,7 +228,7 @@ class AccessoryFinder {
         let accessory = await HSKAccessory(accessory: targetAccessory, eventContinuation: accessoryContuation)
         
         trackedAccessories[keyName] = targetAccessory
-        print("Tracking tracking accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+        logger.info("Tracking tracking accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
 
         if let v = failedWriteValues[keyName] {
             failedWriteValues.removeValue(forKey: keyName)
@@ -217,7 +241,7 @@ class AccessoryFinder {
         for await event in accessoryStream {
             switch event {
             case .characteristicValueUpdated(let characteristic, let value):
-                print("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) for accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+                logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) for accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
                 if let stored = self.dataStore[keyName] {
                     self.dataStore[keyName] = stored.merging([characteristic.localizedDescription : value], uniquingKeysWith: { _, new in
                         new
@@ -228,7 +252,7 @@ class AccessoryFinder {
                 
             }
         }
-        print("Accessory tracking complete for \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+        logger.info("Accessory tracking complete for \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
     }
     
 }

@@ -4,10 +4,6 @@
 
 <dictionary>
     <suite name="HomeScript suite" code="MYAP" description="Standard terms for HomeScript scripting">
-        <command name="command 2" code="MYAPcmd2" description="Performs command 2 with arguments">
-            <cocoa class="HomeScript.MyDoThingWithArgumentCommand"/>
-            <direct-parameter type="list of text" optional="no" description="the arguments"/>
-        </command>
         <command name="track" code="HSPTtrck" description="Tracks a characteristic">
             <cocoa class="HomeScript.AccessoryFinderScripter"/>
             <parameter name="characteristic" type="text" code="char" description="The characteristic name."/>
@@ -32,9 +28,22 @@
             <parameter name="home" type="text" code="hom3" description="The accessory home."/>
             <result type="number" description="The processed string."/>
         </command>
-        <command name="command 1" code="MYAPcmd1" description="Performs command 1">
-            <cocoa class="HomeScript.MyDoThingCommand"/>
+        <command name="tracked accessories" code="HSPTtrak" description="Reads the tracked accessories">
+            <cocoa class="HomeScript.AccessoryTrackedAccessoriesScripter"/>
+            <result  description="The list of tracked accessories.">
+                        <type type="text" list="yes"/>
+            </result>
         </command>
+        <command name="tracked characteristics for" code="HSPTgtca" description="Gets a characteristic Value">
+            <cocoa class="HomeScript.AccessoryTrackedCharacteristicsForAccessoryScripter"/>
+            <parameter name="accessory" type="text" code="acc4" description="The accessory name."/>
+            <parameter name="room" type="text" code="roo4" description="The accessory room."/>
+            <parameter name="home" type="text" code="hom4" description="The accessory home."/>
+            <result  description="The list of tracked characteristics.">
+                        <type type="text" list="yes"/>
+            </result>
+        </command>
+
         <class name="application" code="capp">
             <cocoa class="NSApplication"/>
             <access-group identifier="*" access="rw"/>
@@ -50,9 +59,9 @@
             <property name="saved string" code="sstr" type="text" access="rw" description="the currently exposed string">
                 <cocoa key="savedString"/>
             </property>
-        <property name="version" code="vers" type="text" access="r" description="the version of the application">
+            <property name="version" code="vers" type="text" access="r" description="the version of the application">
             <access-group identifier="*"/>
-        </property>
+            </property>
         </class>
     </suite>
 </dictionary>

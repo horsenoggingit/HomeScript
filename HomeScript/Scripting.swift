@@ -38,17 +38,6 @@ class Scripting: NSObject {
 	}
 }
 
-@objc class MyDoThingCommand: NSScriptCommand {
-	
-	@objc public override func performDefaultImplementation() -> Any? {
-		NSLog("MyDoThingCommand")
-		
-//		DataModel.shared.testState1.toggle()
-		
-		return nil
-	}
-}
-
 @MainActor
 @objc
 class AccessoryFinderScripter: NSScriptCommand {
@@ -93,30 +82,43 @@ class AccessorySetterScripter: NSScriptCommand {
     }
 }
 
-@objc class MyDoThingWithArgumentCommand: NSScriptCommand {
-	@objc public override func performDefaultImplementation() -> Any? {
-		
-		let arguments = evaluatedArguments()
-		
-		NSLog("MyDoThingWithArgumentCommand: \(arguments)")
-		
-		if arguments.count > 0 {
-			if let parameters = arguments.value(forKey: "") as? NSArray { // get the direct argument
-				
-				var processedArray:[String] = []
-				
-				for item in parameters {
-					if let item = item as? String {
-						processedArray.append(item)
-					}
-				}
-//				DataModel.shared.testArgs = processedArray
-			}
-		}
-		
-		
-		return nil
-	}
+@MainActor
+@objc
+class AccessoryCharacteristicsForAccesoryScripter: NSScriptCommand {
+    @objc public override func performDefaultImplementation() -> Any? {
+        
+        let arguments = evaluatedArguments()
+       
+        return AccessoryFinder.shared.readStoredCharacteristicsForAccessory(arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+    }
+}
+
+@MainActor
+@objc
+class AccessoryTrackedAccessoriesScripter: NSScriptCommand {
+    @objc public override func performDefaultImplementation() -> Any? {
+        
+        //let arguments = evaluatedArguments()
+       
+        let x = AccessoryFinder.shared.readTrackedAccessories()
+        
+        let y = x.map { strArr in
+            return NSString(string:"\(strArr.joined(separator: ","))")
+            
+        }
+        return y
+    }
+}
+
+@MainActor
+@objc
+class AccessoryTrackedCharacteristicsForAccessoryScripter: NSScriptCommand {
+    @objc public override func performDefaultImplementation() -> Any? {
+        
+        let arguments = evaluatedArguments()
+       
+        return AccessoryFinder.shared.readStoredCharacteristicsForAccessory(arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+    }
 }
 
 extension NSObject {
