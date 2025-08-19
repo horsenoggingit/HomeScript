@@ -9,9 +9,12 @@ import Foundation
 import HomeKit
 import os
 
+// these are what the user would know
+// the is the minimum object to track
+// the system will automatically track all Services and Characteristics
 struct AFAccessoryNameContainer : Hashable, CustomStringConvertible {
     
-    init(name: String, home: String, room: String?) {
+    init(name: String, home: String, room: String) {
         self.name = name
         self.home = home
         self.room = room
@@ -19,10 +22,10 @@ struct AFAccessoryNameContainer : Hashable, CustomStringConvertible {
     
     let name : String
     let home : String
-    let room : String?
+    let room : String
     
     var description: String {
-        "accessory:'\(self.name)' room:'\(self.room ?? "<none>")' home:'\(self.home)'"
+        "accessory:'\(self.name)' room:'\(self.room)' home:'\(self.home)'"
     }
 }
 
@@ -32,118 +35,142 @@ class AccessoryFinder {
     
     let homeManager = HSKHomeManager()
     let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "AccessoryFinder")
+
+    // fast aaccess to the tracked accessories
     var trackedAccessories = [AFAccessoryNameContainer : HMAccessory]()
-    var dataStore = [AFAccessoryNameContainer : [String: Any?]]()
-    var lastWriteError : Error?
-    var failedWriteValues = [AFAccessoryNameContainer : [String: Any?]]()
+    // Keep track of the relationships between objects
+    // Key(Home:Room:Accessory) : [Service : [ Characteristic : Last read value] ] ]
+    var dataStore = [AFAccessoryNameContainer : [String : [String: Any?]]]()
+    
+    // write error history
+    var writeErrors = [Error]()
 
-/*    init() {
-        Task {
-            await self.trackCharacteristicsInAccessoryNamed("Bobby", inRoomNamed: "Ginza", inHomeNamed: "Tokyo Palace")
-        }
-        Task {
-            await self.trackCharacteristicsInAccessoryNamed("Reading", inRoomNamed: "Ginza", inHomeNamed: "Tokyo Palace")
-        }
-        Task {
-            await self.trackCharacteristicsInAccessoryNamed("Main", inRoomNamed: "Kitchen", inHomeNamed: "AJ Home In Mammoth")
-
-        }
-        Task {
-            self.setTrackedAccessryCharacteristic(value: 1, name: "Power State", accessoryName: "Reading", inRoomNamed: "Ginza", inHomeNamed: "Tokyo Palace")
+    func clearWriteErrors() {
+        self.writeErrors.removeAll()
+    }
+    
+    func serviceToServiceName(_ service: HMService) -> String {
+        service.localizedDescription + " " + service.uniqueIdentifier.uuidString.suffix(5)
+    }
+    
+    // update an entry in the datastore
+    func updateDataStore(key: AFAccessoryNameContainer, serviceName: String, characteristicName : String, value: Any?) {
+        if var stored = self.dataStore[key] {
+            if var inner = stored[serviceName] {
+                inner[characteristicName] = value
+                stored[serviceName] = inner
+            } else {
+                stored[serviceName] = [characteristicName : value]
+            }
+            self.dataStore[key] = stored
+        } else {
+            self.dataStore[key] = [serviceName : [characteristicName: value]]
         }
     }
-*/
-
-    func readStoredCharacteristicNamed(name : String, accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> Any? {
+    
+    // read the latest value of a stored characteristic from the datastore
+    func readStoredCharacteristicNamed(name : String, serviceName: String, accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> Any? {
         
-        guard let innerOptiona = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]?[name] else {
+        guard let innerOptiona = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]?[serviceName]?[name] else {
             return nil
         }
         return innerOptiona
     }
     
-    func readStoredCharacteristicsForAccessory(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> [String]? {
-        let accessoryValues = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]
-        guard let accessoryValues = accessoryValues else {
+    // read the services a stored accessory from the datastore
+    func readStoredServicesForAccessory(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> [String]? {
+        let servicesValues = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]
+        guard let servicesValues else {
             // means there is no information available
             return nil
         }
-        return accessoryValues.keys.sorted()
+        return servicesValues.keys.sorted()
     }
     
+    // read the all the values for all the characteristics of a service of a stored accessory
+    // sorted in alpha order of the characteristics
+    func readStoredValuesForCharacteristicsForService(_ serviceName: String, inAccesoryNamed: String, inRoomNamed: String, inHomeNamed: String) -> [Any?]? {
+        let characteristicsValues = dataStore[AFAccessoryNameContainer(name: inAccesoryNamed, home: inHomeNamed, room: inRoomNamed)]?[serviceName]
+        guard let characteristicsValues else {
+            // means there is no information available
+            return nil
+        }
+        
+        let sortedKeys = characteristicsValues.keys.sorted()
+        
+        let sortedValues = sortedKeys.reduce(into: [Any?]()) { partialResult, nextKey in
+            partialResult.append(characteristicsValues[nextKey] as Any?)
+        }
+        return sortedValues
+    }
+ 
+    // read the all the haracteristics of a service of a stored accessory in alpha order
+    func readStoredCharacteristicsForService(_ serviceName: String, inAccesoryNamed: String, inRoomNamed: String, inHomeNamed: String) -> [String]? {
+        let characteristicsValues = dataStore[AFAccessoryNameContainer(name: inAccesoryNamed, home: inHomeNamed, room: inRoomNamed)]?[serviceName]
+        guard let characteristicsValues else {
+            // means there is no information available
+            return nil
+        }
+        return characteristicsValues.keys.sorted()
+    }
+    
+    // a list of all the tracked accessories, their rooms and homes
     func readTrackedAccessories() -> [[String]] {
         let x = dataStore.keys.map { keyContainer in
-            [keyContainer.name, keyContainer.room ?? "", keyContainer.home]
+            [keyContainer.name, keyContainer.room, keyContainer.home]
         }
         return x
     }
     
-    func trackCharacteristicNamed(name : String, accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> Any? {
-        let value = dataStore[AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)]?[name]
-        if value == nil {
-            logger.info("Characteristing not found. Starting tracking... (\(name) \(accessoryName) \(inRoomNamed) \(inHomeNamed))")
-            Task {
-                await trackCharacteristicsInAccessoryNamed(accessoryName, inRoomNamed: inRoomNamed, inHomeNamed: inHomeNamed)
-            }
-            return nil
-        }
-        return value as Any?
-    }
-    
-    func setTrackedAccessryCharacteristic(value: Any?, name: String, accessoryName: String, inRoomNamed: String?, inHomeNamed: String) -> Bool {
+    // set the value of a characteristic
+    // a write failure will append an error to the write error array
+    // if the write is successful the local datastore is updated
+    func setTrackedAccessryCharacteristic(value: Any?, characteristicName: String, serviceName: String, accessoryName: String, inRoomNamed: String, inHomeNamed: String) -> Bool {
+
         let keyName = AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)
 
         guard let accessory = trackedAccessories[keyName] else {
-            if let kv = self.failedWriteValues[keyName] {
-                self.failedWriteValues[keyName] = kv.merging([name: value]) { (_, new) in
-                    new
-                }
-            } else {
-                self.failedWriteValues[keyName] = [name: value]
-            }
-            
             return false
         }
         
-        for service in accessory.services {
-            let char = service.characteristics.first { char in
-                if char.localizedDescription == name {
-                    return true
-                }
-                return false
-            }
-            guard let char else {
-                continue
-            }
-            char.writeValue(value) { err in
-                if err != nil {
-                    if let kv = self.failedWriteValues[keyName] {
-                        self.failedWriteValues[keyName] = kv.merging([name: value]) { (_, new) in
-                            new
-                        }
-                    } else {
-                        self.failedWriteValues[keyName] = [name: value]
-                    }
-                    self.logger.error("Failed to write value \(String(describing:value)) to characteristic \(name) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed): \(err?.localizedDescription ?? "no error description")")
-                    self.lastWriteError = err
-                    return
-                }
-                self.lastWriteError = nil
-                // need to write the updated value into the data source
-                if let kv = self.dataStore[keyName] {
-                    self.dataStore[keyName] = kv.merging([name: value]) { (_, new) in
-                        new
-                    }
-                } else {
-                    self.dataStore[keyName] = [name: value]
-                }
-                self.logger.info("SET characteristic \(name) value \(String(describing:value)) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed)")
-            }
-            return true
+        let service = accessory.services.first { service in
+            self.serviceToServiceName(service) == serviceName
         }
-        return false
+        
+        guard let service else {
+            logger.error("No service named \(serviceName) in accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
+            return false
+        }
+        
+        let char = service.characteristics.first { char in
+            char.localizedDescription == characteristicName
+        }
+
+        guard let char else {
+            logger.error("No characteristic named \(characteristicName) in service named \(serviceName) in accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
+            return false
+        }
+
+        char.writeValue(value) { err in
+            if let err {
+                self.logger.error("Failed to write value \(String(describing:value)) to characteristic \(characteristicName) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed): \(err.localizedDescription)")
+                let myError = NSError(domain: "AccessoryFinder", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to write value \(String(describing:value)) to characteristic \(characteristicName) for accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed): \(err.localizedDescription)",
+                    NSUnderlyingErrorKey: err])
+                
+                self.writeErrors.append(myError)
+                return
+            }
+
+            // need to write the updated value into the data source
+            self.updateDataStore(key: keyName, serviceName: self.serviceToServiceName(service), characteristicName: characteristicName, value: value)
+
+            self.logger.info("SET characteristic \(characteristicName) value \(String(describing:value)) in service \(self.serviceToServiceName(service)) in accessory \(accessoryName) in room \(String(describing: inRoomNamed)) in home \(inHomeNamed)")
+        }
+        return true
     }
 
+    // find a home - dynamically updates
     private func getTargetHome(_ inHomeNamed: String) async -> HMHome? {
         var contuation : AsyncStream<HSKHomeManagerEventEnum>.Continuation?
         let stream = AsyncStream<HSKHomeManagerEventEnum> { cont in
@@ -169,7 +196,8 @@ class AccessoryFinder {
         return targetHome
     }
     
-    private func getTargetAccessorNamed(_ name: String, inRoomNamed: String, inHome: HMHome) async -> HMAccessory? {
+    // dynamically locate an accessory in a room
+    private func getTargetAccessorNamed(_ accessoryName: String, inRoomNamed: String, inHome: HMHome) async -> HMAccessory? {
         var homeContuation : AsyncStream<HSKHomeEventEnum>.Continuation?
         let homeStream = AsyncStream<HSKHomeEventEnum> { cont in
             homeContuation = cont
@@ -177,15 +205,15 @@ class AccessoryFinder {
         guard let homeContuation else {
             fatalError("contuation nil")
         }
-        logger.info("Looking for accessory \(name) in room \(inRoomNamed) in home \(inHome.name)")
+        logger.info("Looking for accessory \(accessoryName) in room \(inRoomNamed) in home \(inHome.name)")
 
         var targetAccessory : HMAccessory?
         let home = await HSKHome(home: inHome, eventContinuation: homeContuation)
-        await home.addTargetAccessoryName(name, inRoom: inRoomNamed)
+        await home.addTargetAccessoryName(accessoryName, inRoom: inRoomNamed)
         for await event in homeStream {
             switch event {
             case .targetAccessoryUpdated(let hkaccessory):
-                logger.info("Found for accessory \(name) in room \(inRoomNamed) in home \(inHome.name)")
+                logger.info("Found accessory \(accessoryName) in room \(inRoomNamed) in home \(inHome.name)")
                 targetAccessory = hkaccessory
             }
             if targetAccessory != nil {
@@ -195,8 +223,9 @@ class AccessoryFinder {
         return targetAccessory
     }
     
-    func trackCharacteristicsInAccessoryNamed(_ name: String, inRoomNamed: String, inHomeNamed: String) async {
-        let keyName = AFAccessoryNameContainer(name: name, home: inHomeNamed, room: inRoomNamed)
+    // dymaically track accessory value changes and update the datastore
+    func trackAccessoryNamed(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String) async {
+        let keyName = AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)
         logger.info("Starting track of \(keyName)")
         
         guard trackedAccessories[keyName] == nil else {
@@ -208,12 +237,12 @@ class AccessoryFinder {
             return
         }
         
-        guard let targetAccessory = await getTargetAccessorNamed(name, inRoomNamed: inRoomNamed, inHome: targetHome) else {
+        guard let targetAccessory = await getTargetAccessorNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
             return
         }
         
         if let tracked = trackedAccessories[keyName], tracked == targetAccessory {
-            logger.info("Already tracking accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+            logger.info("Already tracking accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
             return
         }
         
@@ -228,31 +257,20 @@ class AccessoryFinder {
         let accessory = await HSKAccessory(accessory: targetAccessory, eventContinuation: accessoryContuation)
         
         trackedAccessories[keyName] = targetAccessory
-        logger.info("Tracking tracking accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+        logger.info("Tracking tracking accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
 
-        if let v = failedWriteValues[keyName] {
-            failedWriteValues.removeValue(forKey: keyName)
-            for (characteristic, value) in v {
-                _ = self.setTrackedAccessryCharacteristic(value: value, name: characteristic, accessoryName: keyName.name, inRoomNamed: keyName.room, inHomeNamed: keyName.home)
-            }
-           
-        }
-        
         for await event in accessoryStream {
             switch event {
-            case .characteristicValueUpdated(let characteristic, let value):
-                logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) for accessory \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
-                if let stored = self.dataStore[keyName] {
-                    self.dataStore[keyName] = stored.merging([characteristic.localizedDescription : value], uniquingKeysWith: { _, new in
-                        new
-                    })
-                } else {
-                    self.dataStore[keyName] = [characteristic.localizedDescription : value]
-                }
+            case .characteristicValueUpdated(let service, let characteristic, let value):
                 
+                let serviceName = self.serviceToServiceName(service)
+                
+                logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) in service \(serviceName) of accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
+ 
+                self.updateDataStore(key: keyName, serviceName: serviceName, characteristicName: characteristic.localizedDescription, value: value)
             }
         }
-        logger.info("Accessory tracking complete for \(name) in room \(inRoomNamed) in home \(inHomeNamed)")
+        logger.info("Accessory tracking complete for \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
     }
     
 }

@@ -7,6 +7,7 @@
 
 import Foundation
 import HomeKit
+import os
 
 enum HSKHomeEventEnum {
     case targetAccessoryUpdated(HMAccessory)
@@ -33,6 +34,7 @@ actor HSKHome {
     var targetAccessoryNames = Set<AccessoryNameAndRoom>()
     var targetAccessories = Set<HMAccessory>()
     var eventContinuation : AsyncStream<HSKHomeEventEnum>.Continuation?
+    let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "HSKHome", category: "HSKHome")
     
     init(home: HMHome, eventContinuation: AsyncStream<HSKHomeEventEnum>.Continuation?) async {
         self.home = home
@@ -127,7 +129,7 @@ actor HSKHome {
     }
     
     func addAccessory(_ accessory: HMAccessory) {
-        print("Adding Accessory: \(accessory.name)")
+        logger.info("Adding Accessory: \(accessory.name)")
         let newAccessoryNameAndRoom: AccessoryNameAndRoom = AccessoryNameAndRoom(name: accessory.name, room: accessory.room?.name)
         // already have this one
         guard (self.targetAccessories.contains { accessory in
@@ -144,14 +146,14 @@ actor HSKHome {
     }
     
     func removeAccessory(_ accessory: HMAccessory) {
-        print("Removing Accessory: \(accessory.name)")
+        logger.info("Removing Accessory: \(accessory.name)")
         self.targetAccessories.remove(accessory)
 
     }
     
     func addTargetAccessory(_ accessory: HMAccessory) {
         self.targetAccessories.insert(accessory)
-        print("New Target Accessory: \(accessory.name)")
+        logger.info("New Target Accessory: \(accessory.name)")
         self.eventContinuation?.yield(.targetAccessoryUpdated(accessory))
     }
     
@@ -166,7 +168,7 @@ actor HSKHome {
             return
         }
         self.targetAccessoryNames.insert(newAccessoryNameAndRoom)
-        print("New Target Accessory Name: \(name)")
+        logger.info("New Target Accessory Name: \(name)")
         for accessory in home.accessories {
             let accessoryNameAndRoom: AccessoryNameAndRoom = AccessoryNameAndRoom(name: accessory.name, room: accessory.room?.name)
             

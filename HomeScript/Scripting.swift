@@ -42,12 +42,13 @@ class Scripting: NSObject {
 @objc
 class AccessoryFinderScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
-        
         let arguments = evaluatedArguments()
-        _ = AccessoryFinder.shared.trackCharacteristicNamed(name: arguments["characteristic"] as! String,
-                                                        accessoryName: arguments["accessory"] as! String,
-                                                        inRoomNamed: arguments["room"] as! String,
-                                                        inHomeNamed: arguments["home"] as! String)
+        Task {
+            _ = await AccessoryFinder.shared.trackAccessoryNamed(arguments["accessory"] as! String,
+                                                                 inRoomNamed: arguments["room"] as! String,
+                                                                 inHomeNamed: arguments["home"] as! String)
+            
+        }
         return nil
     }
 }
@@ -59,10 +60,30 @@ class AccessoryGetterScripter: NSScriptCommand {
         
         let arguments = evaluatedArguments()
         let x = AccessoryFinder.shared.readStoredCharacteristicNamed(name: arguments["characteristic"] as! String,
-                                                                        accessoryName: arguments["accessory"] as! String,
-                                                                        inRoomNamed: arguments["room"] as! String,
-                                                                        inHomeNamed: arguments["home"] as! String)
-        return x
+                                                                     serviceName: arguments["service"] as! String,
+                                                                     accessoryName: arguments["accessory"] as! String,
+                                                                     inRoomNamed: arguments["room"] as! String,
+                                                                     inHomeNamed: arguments["home"] as! String)
+   
+        guard let x else { return nil }
+        
+        if let s = x as? String {
+            return NSString(string: s)
+        }
+
+        if let y = x as? Bool {
+            return NSNumber(value: y)
+        }
+        
+        if let y = x as? Int {
+            return NSNumber(value: y)
+        }
+        
+        if let y = x as? Double {
+            return NSNumber(value: y)
+        }
+        
+        return nil
     }
 }
 
@@ -73,25 +94,32 @@ class AccessorySetterScripter: NSScriptCommand {
         
         let arguments = evaluatedArguments()
         _ = AccessoryFinder.shared.setTrackedAccessryCharacteristic(value: arguments[""],
-                                                                name: arguments["toCharacteristic"] as! String,
-                                                                accessoryName: arguments["accessory"] as! String,
+                                                                    characteristicName: arguments["toCharacteristic"] as! String,
+                                                                    serviceName: arguments["service"] as! String,
+                                                                    accessoryName: arguments["accessory"] as! String,
                                                                     inRoomNamed: (arguments["room"] as! String),
-                                                                inHomeNamed: arguments["home"] as! String)
+                                                                    inHomeNamed: arguments["home"] as! String)
        
         return nil
     }
 }
 
+
+
 @MainActor
 @objc
-class AccessoryCharacteristicsForAccesoryScripter: NSScriptCommand {
+class AccessoryServicesForAccessoryScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
+
+        return AccessoryFinder.shared.readStoredServicesForAccessory(arguments["accessory"] as! String,
+                                                                          inRoomNamed: (arguments["room"] as! String),
+                                                                          inHomeNamed: arguments["home"] as! String)
        
-        return AccessoryFinder.shared.readStoredCharacteristicsForAccessory(arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
     }
 }
+
 
 @MainActor
 @objc
@@ -112,12 +140,48 @@ class AccessoryTrackedAccessoriesScripter: NSScriptCommand {
 
 @MainActor
 @objc
-class AccessoryTrackedCharacteristicsForAccessoryScripter: NSScriptCommand {
+class AccessoryTrackedCharacteristicsForServiceScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
        
-        return AccessoryFinder.shared.readStoredCharacteristicsForAccessory(arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+        return AccessoryFinder.shared.readStoredCharacteristicsForService(arguments["service"] as! String, inAccesoryNamed: arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+    }
+}
+
+@MainActor
+@objc
+class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
+    @objc public override func performDefaultImplementation() -> Any? {
+        
+        let arguments = evaluatedArguments()
+  
+        let list =  AccessoryFinder.shared.readStoredValuesForCharacteristicsForService(arguments["service"] as! String, inAccesoryNamed: arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+        
+        guard let list else {
+            return nil
+        }
+        let appleList = NSAppleEventDescriptor(listDescriptor: ())
+ 
+        for x in list {
+            let ad: NSAppleEventDescriptor
+            if x == nil {
+                ad = NSAppleEventDescriptor(listDescriptor: ())
+            } else if let y = x as? String {
+                ad = NSAppleEventDescriptor(string: y)
+            } else if let y = x as? Bool {
+                ad = NSAppleEventDescriptor(boolean: y)
+            } else if let y = x as? Int {
+  
+                ad = NSAppleEventDescriptor(int32: sint32(y))
+            } else  {
+                ad =  NSAppleEventDescriptor(listDescriptor: ())
+            }
+            
+            appleList.insert(ad, at: 0)
+        }
+        
+        return appleList
     }
 }
 
@@ -125,38 +189,12 @@ extension NSObject {
 	@objc public func MyAppScriptingValueForKey(_ key:String) -> Any? {
 		
 		NSLog("[APPLESCRIPT] Querying value for \(key)")
-		
-		if key == "savedString" {
-			return "aaa" //DataModel.shared.testString
-		}
-		
-		if key == "savedNumber" {
-			return 3 //DataModel.shared.testNumber
-		}
-		
-		if key == "savedList" {
-			return ["One", "Two", "Three"] //[DataModel.shared.testList
-		}
-		
-		if key == "savedBool" {
-			return true //DataModel.shared.testBool
-		}
-		
+			
 		return self.MyAppScriptingValueForKey(key)
 	}
 	
 	@objc public func MyAppScriptingSetValue(_ value:Any, forKey:String) {
 		NSLog("[APPLESCRIPT] Setting value for \(forKey): \(String(describing:value))")
-		
-		if forKey == "savedString" {
-//			DataModel.shared.testString = String(describing:value)
-			return
-		}
-		
-		if forKey == "savedNumber" {
-//			DataModel.shared.testNumber = value as? Int ?? -1
-			return
-		}
 		
 		return self.MyAppScriptingSetValue(value, forKey: forKey)
 	}

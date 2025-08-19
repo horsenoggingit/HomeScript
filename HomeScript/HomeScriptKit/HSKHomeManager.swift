@@ -7,6 +7,7 @@
 
 import Foundation
 import HomeKit
+import os
 
 
 enum HSKHomeManagerEventEnum : Equatable {
@@ -20,6 +21,7 @@ actor HSKHomeManager {
     let streamContinuation : AsyncStream<HSKHMHomeManagerDelegateEnum>.Continuation
     var targetHomeNames = Set<String>()
     var eventContinuations = [AsyncStream<HSKHomeManagerEventEnum>.Continuation]()
+    var logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "HSKHomeManager", category: "HSKHomeManager")
     
     init () {
         var cont : AsyncStream<HSKHMHomeManagerDelegateEnum>.Continuation?
@@ -69,7 +71,7 @@ actor HSKHomeManager {
     }
     
     func addHome(_ home: HMHome) {
-        print("Adding Home: \(home.name)")
+        logger.info("Adding Home: \(home.name)")
 
         if self.targetHomeNames.contains(home.name) {
             setTargetHome(home)
@@ -77,7 +79,7 @@ actor HSKHomeManager {
     }
     
     func removeHome(_ home: HMHome) {
-        print("Removing Home: \(home.name)")
+        logger.info("Removing Home: \(home.name)")
         if targetHomeNames.contains(home.name) {
             setTargetHome(nil)
         }
@@ -90,7 +92,7 @@ actor HSKHomeManager {
     }
     
     func setTargetHome(_ home: HMHome?) {
-        print("New Target Home: \( home?.name ?? "undefined")")
+        logger.info("New Target Home: \( home?.name ?? "undefined")")
         var indexes = [Int]()
         
         for (index, cont) in self.eventContinuations.enumerated() {
@@ -106,7 +108,6 @@ actor HSKHomeManager {
             self.eventContinuations.remove(at: index)
         }
     }
-
 }
 
 

@@ -9,7 +9,7 @@ import Foundation
 import HomeKit
 
 enum HSKAccessoryEventEnum {
-    case characteristicValueUpdated(HMCharacteristic, Any?)
+    case characteristicValueUpdated(HMService, HMCharacteristic, Any?)
 }
 
 actor HSKAccessory {
@@ -48,8 +48,8 @@ actor HSKAccessory {
                     break
                 case .didUpdateNameForService(_, didUpdateNameFor: _):
                     break
-                case .didUpdateValueForCharacteristic(_, service: _, didUpdateValueFor: let didUpdateValueFor):
-                    await self?.updatedValueForCharacteristic(didUpdateValueFor)
+                case .didUpdateValueForCharacteristic(_, service: let service, didUpdateValueFor: let didUpdateValueFor):
+                    await self?.updatedValueForCharacteristic(didUpdateValueFor, service: service)
                     break
                 case .didUpdateAssociatedServiceTypeFor(_, didUpdateAssociatedServiceTypeFor: _):
                     break
@@ -65,21 +65,26 @@ actor HSKAccessory {
         
         for service in accessory.services {
             for characteristic in service.characteristics {
-                try? await characteristic.enableNotification(true)
- 
-                do {
-                    try await characteristic.readValue()
-                } catch {
-                    print ("Error reading characteristic \(characteristic.localizedDescription) value: \(error)")
+                
+                if characteristic.properties.contains(HMCharacteristicPropertySupportsEventNotification) {
+                    try? await characteristic.enableNotification(true)
                 }
-                self.updatedValueForCharacteristic(characteristic)
+               
+                if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
+                    do {
+                        try await characteristic.readValue()
+                    } catch {
+                        print ("Error reading characteristic \(characteristic.localizedDescription) value: \(error)")
+                    }
+                }
+                self.updatedValueForCharacteristic(characteristic, service: service)
             }
         }
 
     }
     
-    func updatedValueForCharacteristic(_ characteristic: HMCharacteristic) {
-        self.eventContinuation.yield(.characteristicValueUpdated(characteristic, characteristic.value))
+    func updatedValueForCharacteristic(_ characteristic: HMCharacteristic, service: HMService) {
+        self.eventContinuation.yield(.characteristicValueUpdated(service, characteristic, characteristic.value))
     }
     
     deinit {
