@@ -43,12 +43,19 @@ class Scripting: NSObject {
 class AccessoryFinderScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         let arguments = evaluatedArguments()
-        Task {
+        
+        Task { [weak self] in
             _ = await AccessoryFinder.shared.trackAccessoryNamed(arguments["accessory"] as! String,
-                                                                 inRoomNamed: arguments["room"] as! String,
-                                                                 inHomeNamed: arguments["home"] as! String)
-            
+                                                              inRoomNamed: arguments["room"] as! String,
+                                                                       inHomeNamed: arguments["home"] as! String, resultWrittenCallback: { r in
+                let result = r?.array().reduce(into: NSMutableArray()) { partialResult, str in
+                        partialResult.add(NSString(string: str))
+                }
+                self?.resumeExecution(withResult: result)
+            })
+                        
         }
+        suspendExecution()
         return nil
     }
 }
@@ -59,16 +66,21 @@ class AccessoryGetterScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
+        let accessory: AFAccessoryNameContainer
+        do {
+            accessory = try AFAccessoryNameContainer(arguments["accessory"] as! [String])
+        } catch {
+            fatalError("Could not parse accessory name")
+        }
+        
         let x = AccessoryFinder.shared.readStoredCharacteristicNamed(name: arguments["characteristic"] as! String,
                                                                      serviceName: arguments["service"] as! String,
-                                                                     accessoryName: arguments["accessory"] as! String,
-                                                                     inRoomNamed: arguments["room"] as! String,
-                                                                     inHomeNamed: arguments["home"] as! String)
+                                                                     accessory: accessory)
    
         guard let x else { return nil }
         
-        if let s = x as? String {
-            return NSString(string: s)
+        if let y = x as? String {
+            return NSString(string: y)
         }
 
         if let y = x as? Bool {
@@ -93,13 +105,17 @@ class AccessorySetterScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
+        let accessory: AFAccessoryNameContainer
+        do {
+            accessory = try AFAccessoryNameContainer(arguments["accessory"] as! [String])
+        } catch {
+            fatalError("Could not parse accessory name")
+        }
+
         _ = AccessoryFinder.shared.setTrackedAccessryCharacteristic(value: arguments[""],
                                                                     characteristicName: arguments["toCharacteristic"] as! String,
                                                                     serviceName: arguments["service"] as! String,
-                                                                    accessoryName: arguments["accessory"] as! String,
-                                                                    inRoomNamed: (arguments["room"] as! String),
-                                                                    inHomeNamed: arguments["home"] as! String)
-       
+                                                                    accessory: accessory)
         return nil
     }
 }
@@ -112,10 +128,13 @@ class AccessoryServicesForAccessoryScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
-
-        return AccessoryFinder.shared.readStoredServicesForAccessory(arguments["accessory"] as! String,
-                                                                          inRoomNamed: (arguments["room"] as! String),
-                                                                          inHomeNamed: arguments["home"] as! String)
+        let accessory: AFAccessoryNameContainer
+        do {
+            accessory = try AFAccessoryNameContainer(arguments["accessory"] as! [String])
+        } catch {
+            fatalError("Could not parse accessory name")
+        }
+        return AccessoryFinder.shared.readStoredServicesForAccessory(accessory)
        
     }
 }
@@ -144,8 +163,13 @@ class AccessoryTrackedCharacteristicsForServiceScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
-       
-        return AccessoryFinder.shared.readStoredCharacteristicsForService(arguments["service"] as! String, inAccesoryNamed: arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+        let accessory: AFAccessoryNameContainer
+        do {
+            accessory = try AFAccessoryNameContainer(arguments["accessory"] as! [String])
+        } catch {
+            fatalError("Could not parse accessory name")
+        }
+        return AccessoryFinder.shared.readStoredCharacteristicsForService(arguments["service"] as! String, accessory: accessory)
     }
 }
 
@@ -155,8 +179,14 @@ class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         let arguments = evaluatedArguments()
-  
-        let list =  AccessoryFinder.shared.readStoredValuesForCharacteristicsForService(arguments["service"] as! String, inAccesoryNamed: arguments["accessory"] as! String, inRoomNamed: (arguments["room"] as! String), inHomeNamed: arguments["home"] as! String)
+        let accessory: AFAccessoryNameContainer
+        do {
+            accessory = try AFAccessoryNameContainer(arguments["accessory"] as! [String])
+        } catch {
+            fatalError("Could not parse accessory name")
+        }
+
+        let list =  AccessoryFinder.shared.readStoredValuesForCharacteristicsForService(arguments["service"] as! String, accesory: accessory)
         
         guard let list else {
             return nil
@@ -184,6 +214,7 @@ class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
         return appleList
     }
 }
+
 
 extension NSObject {
 	@objc public func MyAppScriptingValueForKey(_ key:String) -> Any? {

@@ -84,6 +84,10 @@ actor HSKAccessory {
     }
     
     func updatedValueForCharacteristic(_ characteristic: HMCharacteristic, service: HMService) {
+        guard characteristic.properties.contains(HMCharacteristicPropertyReadable) else {
+            self.eventContinuation.yield(.characteristicValueUpdated(service, characteristic, nil))
+            return 
+        }
         self.eventContinuation.yield(.characteristicValueUpdated(service, characteristic, characteristic.value))
     }
     
