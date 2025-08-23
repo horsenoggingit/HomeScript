@@ -56,6 +56,12 @@
         <command name="tracked services" code="HSPTgtks" description="Gets a characteristic Value">
             <cocoa class="HomeScript.AccessoryServicesForAccessoryScripter"/>
             <parameter name="accessory" type="list of text" code="acc8" description="The accessory name."/>
+            <parameter name="starting" type="text" optional="yes" code="str8" description="The accessory name."/>
+            <parameter name="characteristic starting" type="text" optional="yes" code="stc8" description="The accessory name."/>
+            <parameter name="value" optional="yes" code="vac8" description="The accessory name.">
+                <type type="text"/>
+                <type type="number"/>
+            </parameter>
             <result description="The list of tracked services.">
                 <type type="text" list="yes"/>
             </result>

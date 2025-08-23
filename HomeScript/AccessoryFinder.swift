@@ -51,6 +51,8 @@ class AccessoryFinder {
     let homeManager = HSKHomeManager()
     let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "AccessoryFinder")
 
+    var trackedHomes = [String: HSKHome]()
+    
     // fast aaccess to the tracked accessories
     var trackedAccessories = [AFAccessoryNameContainer : HMAccessory]()
     // Keep track of the relationships between objects
@@ -92,14 +94,52 @@ class AccessoryFinder {
         return innerOptiona
     }
     
-    // read the services a stored accessory from the datastore
-    func readStoredServicesForAccessory(_ accessory: AFAccessoryNameContainer) -> [String]? {
+    // read the services in a stored accessory from the datastore
+    func readStoredServicesForAccessory(_ accessory: AFAccessoryNameContainer, startingWith: String? = nil, characterissticStartingWith: String? = nil, value: Any? = nil) -> [String]? {
         let servicesValues = dataStore[accessory]
         guard let servicesValues else {
             // means there is no information available
             return nil
         }
-        return servicesValues.keys.sorted()
+        return servicesValues.keys.filter({ serviceKey in
+            guard let startingWith else {
+                return true
+            }
+            return serviceKey.starts(with: startingWith)
+        })
+        .filter({ serviceKey in
+            guard let characterissticStartingWith else {
+                return true
+            }
+            
+            guard let cv = dataStore[accessory]?[serviceKey] else {
+                return false
+            }
+            for (k, v) in cv {
+                if value == nil {
+                    if k.starts(with: characterissticStartingWith) {
+                        return true
+                    }
+                } else {
+                    if k.starts(with: characterissticStartingWith) {
+                        if let vv = v as? String, vv == value as? String {
+                            return true
+                        }
+                        if let vv = v as? Int, vv == value as? Int {
+                            return true
+                        }
+                        if let vv = v as? Bool, vv == value as? Bool {
+                            return true
+                        }
+                    }
+                }
+                
+            }
+            return false
+        })
+        
+        
+        .sorted()
     }
     
     // read the all the values for all the characteristics of a service of a stored accessory
@@ -206,11 +246,12 @@ class AccessoryFinder {
                 break
             }
         }
+        
         return targetHome
     }
     
-    // dynamically locate an accessory in a room
-    private func getTargetAccessorNamed(_ accessoryName: String, inRoomNamed: String, inHome: HMHome) async -> HMAccessory? {
+    
+    private func getTargetAccessorNamed(_ accessoryName: String, inRoomNamed: String, inHome: HSKHome) async -> HMAccessory? {
         var homeContuation : AsyncStream<HSKHomeEventEnum>.Continuation?
         let homeStream = AsyncStream<HSKHomeEventEnum> { cont in
             homeContuation = cont
@@ -218,22 +259,33 @@ class AccessoryFinder {
         guard let homeContuation else {
             fatalError("contuation nil")
         }
-        logger.info("Looking for accessory \(accessoryName) in room \(inRoomNamed) in home \(inHome.name)")
-
+        
+        if let storedHome = self.trackedHomes[inHome.home.name] {
+            if storedHome.home.uniqueIdentifier != inHome.home.uniqueIdentifier {
+                logger.error("Different IDs for homes with name \(inHome.home.name)")
+                return nil
+            }
+        } else {
+            self.trackedHomes[inHome.home.name] = inHome
+        }
+        
+        await inHome.addTargetAccessoryName(accessoryName, inRoom: inRoomNamed, cont: homeContuation)
         var targetAccessory : HMAccessory?
-        let home = await HSKHome(home: inHome, eventContinuation: homeContuation)
-        await home.addTargetAccessoryName(accessoryName, inRoom: inRoomNamed)
+
         for await event in homeStream {
             switch event {
             case .targetAccessoryUpdated(let hkaccessory):
-                logger.info("Found accessory \(accessoryName) in room \(inRoomNamed) in home \(inHome.name)")
-                targetAccessory = hkaccessory
+                if hkaccessory.name == accessoryName {
+                    logger.info("Found accessory \(accessoryName) in room \(inRoomNamed) in home \(inHome.home.name)")
+                    targetAccessory = hkaccessory
+                }
             }
             if targetAccessory != nil {
                 break
             }
         }
         return targetAccessory
+        
     }
     
     // dymaically track accessory value changes and update the datastore
@@ -241,65 +293,75 @@ class AccessoryFinder {
         var resultWritten = false
         let keyName = AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)
         logger.info("Starting track of \(keyName)")
-            guard trackedAccessories[keyName] == nil else {
-                logger.info("Accessory already tracked of \(keyName)")
-                resultWrittenCallback?(keyName)
-                return keyName
-            }
-            
-            guard let targetHome = await getTargetHome(inHomeNamed) else {
-                resultWrittenCallback?(nil)
-                return nil
-            }
-            
-            guard let targetAccessory = await getTargetAccessorNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
-                resultWrittenCallback?(nil)
-                return nil
-            }
-            
-            if let tracked = trackedAccessories[keyName], tracked == targetAccessory {
-                logger.info("Already tracking accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
-                resultWrittenCallback?(keyName)
-                return keyName
-            }
-            
-            var accessoryContuation : AsyncStream<HSKAccessoryEventEnum>.Continuation?
-            let accessoryStream = AsyncStream<HSKAccessoryEventEnum> { cont in
-                accessoryContuation = cont
-            }
-            guard let accessoryContuation else {
-                fatalError("contuation nil")
-            }
-            
-            let accessory = await HSKAccessory(accessory: targetAccessory, eventContinuation: accessoryContuation)
-            
-            var accessoryServices = accessory.accessory.services
+        guard trackedAccessories[keyName] == nil else {
+            logger.info("Accessory already tracked of \(keyName)")
+            resultWrittenCallback?(keyName)
+            return keyName
+        }
         
-            trackedAccessories[keyName] = targetAccessory
-            logger.info("Tracking tracking accessory \(keyName.description)")
-
-            for await event in accessoryStream {
-                switch event {
-                case .characteristicValueUpdated(let service, let characteristic, let value):
-                    
-                    let serviceName = self.serviceToServiceName(service)
-                    
-                    logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) in service \(serviceName) of accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
-     
-                    self.updateDataStore(key: keyName, serviceName: serviceName, characteristicName: characteristic.localizedDescription, value: value)
-                    
-                    accessoryServices.removeAll { ss in
-                        ss == service
-                    }
-                    if accessoryServices.isEmpty, !resultWritten, let resultWrittenCallback {
-                        resultWrittenCallback(keyName)
-                        resultWritten = true
-                    }
+        let targetHome: HSKHome
+        
+        if let storedHome = trackedHomes[inHomeNamed] {
+            logger.info("Reusing home \(inHomeNamed)")
+            targetHome = storedHome
+        } else {
+            guard let newHome = await getTargetHome(inHomeNamed) else {
+                resultWrittenCallback?(nil)
+                return nil
+            }
+            logger.info("Tracking new home \(inHomeNamed)")
+            targetHome = await HSKHome(home: newHome)
+        }
+        
+        guard let targetAccessory = await getTargetAccessorNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
+            resultWrittenCallback?(nil)
+            return nil
+        }
+        
+        if let tracked = trackedAccessories[keyName], tracked == targetAccessory {
+            logger.info("Already tracking accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
+            resultWrittenCallback?(keyName)
+            return keyName
+        }
+        
+        var accessoryContuation : AsyncStream<HSKAccessoryEventEnum>.Continuation?
+        let accessoryStream = AsyncStream<HSKAccessoryEventEnum> { cont in
+            accessoryContuation = cont
+        }
+        guard let accessoryContuation else {
+            fatalError("contuation nil")
+        }
+        
+        let accessory = await HSKAccessory(accessory: targetAccessory, eventContinuation: accessoryContuation)
+        
+        var accessoryServices = accessory.accessory.services
+        
+        trackedAccessories[keyName] = targetAccessory
+        logger.info("Tracking tracking accessory \(keyName.description)")
+        
+        for await event in accessoryStream {
+            switch event {
+            case .characteristicValueUpdated(let service, let characteristic, let value):
+                
+                let serviceName = self.serviceToServiceName(service)
+                
+                logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) in service \(serviceName) of accessory \(keyName.description)")
+                
+                self.updateDataStore(key: keyName, serviceName: serviceName, characteristicName: characteristic.localizedDescription, value: value)
+                
+                accessoryServices.removeAll { ss in
+                    ss == service
+                }
+                // call the calback to inform that all the expected values have been writted
+                if accessoryServices.isEmpty, !resultWritten, let resultWrittenCallback {
+                    resultWrittenCallback(keyName)
+                    resultWritten = true
                 }
             }
-            logger.info("Accessory tracking complete for \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
+        }
+        logger.info("Accessory tracking complete for \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
         return keyName
     }
-
+    
     
 }

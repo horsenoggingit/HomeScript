@@ -134,7 +134,9 @@ class AccessoryServicesForAccessoryScripter: NSScriptCommand {
         } catch {
             fatalError("Could not parse accessory name")
         }
-        return AccessoryFinder.shared.readStoredServicesForAccessory(accessory)
+        return AccessoryFinder.shared.readStoredServicesForAccessory(accessory, startingWith: arguments["starting"] as? String,
+                                                                     characterissticStartingWith: arguments["characteristicStarting"] as? String,
+                                                                     value: arguments["value"])
        
     }
 }

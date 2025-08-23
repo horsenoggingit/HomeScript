@@ -88,15 +88,19 @@ actor HSKHomeManager {
     func addNewTargetHomeName(_ name : String, cont: AsyncStream<HSKHomeManagerEventEnum>.Continuation) {
         self.targetHomeNames.insert(name)
         self.eventContinuations.append(cont)
-        cont.yield(.targetHomesUpdated(self.hm.homes))
+        yieldEvent(.targetHomesUpdated(self.hm.homes))
     }
     
     func setTargetHome(_ home: HMHome?) {
         logger.info("New Target Home: \( home?.name ?? "undefined")")
+        yieldEvent(.targetHomesUpdated(self.hm.homes))
+    }
+    
+    func yieldEvent(_ event: HSKHomeManagerEventEnum) {
         var indexes = [Int]()
         
         for (index, cont) in self.eventContinuations.enumerated() {
-            switch cont.yield(.targetHomesUpdated(hm.homes)) {
+            switch cont.yield(event) {
             case .terminated:
                 indexes.insert(index, at: 0)
             default:
@@ -106,7 +110,7 @@ actor HSKHomeManager {
         
        for index in indexes {
             self.eventContinuations.remove(at: index)
-        }
+       }
     }
 }
 

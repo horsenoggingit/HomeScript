@@ -30,15 +30,19 @@ actor HSKHome {
     let home: HMHome
     let homeDelegate : HSKHMHomeDelegate
     let stream : AsyncStream<HSKHMHomeDelegateEnum>
+
     let streamContinuation : AsyncStream<HSKHMHomeDelegateEnum>.Continuation
     var targetAccessoryNames = Set<AccessoryNameAndRoom>()
     var targetAccessories = Set<HMAccessory>()
-    var eventContinuation : AsyncStream<HSKHomeEventEnum>.Continuation?
+    var eventContinuations = [AsyncStream<HSKHomeEventEnum>.Continuation]()
+
     let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "HSKHome", category: "HSKHome")
     
-    init(home: HMHome, eventContinuation: AsyncStream<HSKHomeEventEnum>.Continuation?) async {
+    init(home: HMHome, eventContinuation: AsyncStream<HSKHomeEventEnum>.Continuation? = nil) async {
         self.home = home
-        self.eventContinuation = eventContinuation
+        if let eventContinuation {
+            self.eventContinuations.append(eventContinuation)
+        }
         var cont : AsyncStream<HSKHMHomeDelegateEnum>.Continuation?
         stream = AsyncStream<HSKHMHomeDelegateEnum> { continuation in
             cont = continuation
@@ -124,7 +128,9 @@ actor HSKHome {
     
     deinit {
         print("HSKHome deinitialized")
-        self.eventContinuation?.finish()
+        self.eventContinuations.forEach({ cont in
+            cont.finish()
+        })
         self.streamContinuation.finish()
     }
     
@@ -154,10 +160,10 @@ actor HSKHome {
     func addTargetAccessory(_ accessory: HMAccessory) {
         self.targetAccessories.insert(accessory)
         logger.info("New Target Accessory: \(accessory.name)")
-        self.eventContinuation?.yield(.targetAccessoryUpdated(accessory))
+        yieldEvent(.targetAccessoryUpdated(accessory))
     }
     
-    func addTargetAccessoryName(_ name: String, inRoom room: String) {
+    func addTargetAccessoryName(_ name: String, inRoom room: String, cont: AsyncStream<HSKHomeEventEnum>.Continuation) {
         let newAccessoryNameAndRoom: AccessoryNameAndRoom = AccessoryNameAndRoom(name: name, room: room)
         guard (self.targetAccessoryNames.contains { accessoryNameAndRoom in
             if accessoryNameAndRoom == newAccessoryNameAndRoom {
@@ -168,6 +174,7 @@ actor HSKHome {
             return
         }
         self.targetAccessoryNames.insert(newAccessoryNameAndRoom)
+        self.eventContinuations.append(cont)
         logger.info("New Target Accessory Name: \(name)")
         for accessory in home.accessories {
             let accessoryNameAndRoom: AccessoryNameAndRoom = AccessoryNameAndRoom(name: accessory.name, room: accessory.room?.name)
@@ -177,5 +184,22 @@ actor HSKHome {
                 return
             }
         }
+    }
+    
+    func yieldEvent(_ event: HSKHomeEventEnum) {
+        var indexes = [Int]()
+        
+        for (index, cont) in self.eventContinuations.enumerated() {
+            switch cont.yield(event) {
+            case .terminated:
+                indexes.insert(index, at: 0)
+            default:
+                break
+            }
+        }
+        
+       for index in indexes {
+            self.eventContinuations.remove(at: index)
+       }
     }
 }
