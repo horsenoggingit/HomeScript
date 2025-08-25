@@ -108,9 +108,9 @@ actor HSKHomeManager {
             }
         }
         
-       for index in indexes {
+        for index in indexes.reversed() {
             self.eventContinuations.remove(at: index)
-       }
+        }
     }
 }
 

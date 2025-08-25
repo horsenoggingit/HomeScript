@@ -8,6 +8,7 @@
 #if targetEnvironment(macCatalyst)
 
 import Foundation
+import os
 
 class Scripting: NSObject {
 	
@@ -54,7 +55,8 @@ class AccessoryFinderScripter: NSScriptCommand {
             
             let timerTask = Task {
                 try? await Task.sleep(for: .seconds(timeout))
-                    task?.cancel()
+                if Task.isCancelled { return }
+                task?.cancel()
                 self?.scriptErrorNumber = -42
                 self?.scriptErrorString = "Timeout trying to find accessory: \(arguments["accessory"] as! String), \(arguments["room"] as! String), \(arguments["home"] as! String) whle tracking status was: \(trackingStatus)"
                 self?.resumeExecution(withResult: {})
@@ -67,6 +69,7 @@ class AccessoryFinderScripter: NSScriptCommand {
                     let result = r?.array().reduce(into: NSMutableArray()) { partialResult, str in
                             partialResult.add(NSString(string: str))
                     }
+                    timerTask.cancel()
                     self?.resumeExecution(withResult: result)
                 }, statusCallback: { status in
                     trackingStatus = status
@@ -81,10 +84,161 @@ class AccessoryFinderScripter: NSScriptCommand {
               
             timerTask.cancel()
         }
-        
-        
-        
 
+        suspendExecution()
+        return nil
+    }
+}
+
+@MainActor
+@objc
+class AccessoryTrackedGetterScripter: NSScriptCommand {
+    
+    static var historyStore = [String: [[AFAccessoryNameContainer : [String : [String: Any?]]]]]()
+    static var continuationStore = [String: AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]>.Continuation]()
+    static var isConnectedStore = Set<String>()
+    static var taskStore = [String: Task<Void, Never>]()
+    static var timerTaskStore = [String: Task<Void, Never>]()
+    static let logger = Logger()
+    static var resumerStore = [String: (NSAppleEventDescriptor?) -> Void]()
+    
+    func eventToRecord(_ event :[String: [[AFAccessoryNameContainer : [String : [String: Any?]]]]]) -> NSAppleEventDescriptor? {
+        let record = NSAppleEventDescriptor(listDescriptor: ())
+        
+        let client = event.keys.first
+        guard let client else {
+            return nil
+        }
+        
+        let clientEvents = event[client] ?? []
+        
+        let eventList = NSAppleEventDescriptor(listDescriptor: ())
+        
+        
+        clientEvents.forEach { event in
+            let theRecord = NSAppleEventDescriptor(listDescriptor: ())
+            let accessory = event.keys.first
+            guard let accessory else {
+                eventList.insert(theRecord, at: 0)
+                return
+            }
+            let listRecord = NSAppleEventDescriptor(listDescriptor: ())
+            accessory.array().forEach { item in
+                listRecord.insert(NSAppleEventDescriptor(string: item), at: 0)
+            }
+            theRecord.insert(listRecord, at: 0)
+            let service = event[accessory]?.keys.first
+            guard let service else {
+                eventList.insert(theRecord, at: 0)
+                return
+            }
+            theRecord.insert(NSAppleEventDescriptor(string: service), at: 0)
+            
+            guard let characteristic = event[accessory]?[service]?.keys.first else {
+                eventList.insert(theRecord, at: 0)
+                return
+            }
+            theRecord.insert(NSAppleEventDescriptor(string:characteristic), at: 0)
+
+            let value = event[accessory]?[service]?[characteristic]
+            let ad : NSAppleEventDescriptor
+            if value == nil {
+                ad = NSAppleEventDescriptor(listDescriptor: ())
+            } else if let y = value as? String {
+                ad = NSAppleEventDescriptor(string: y)
+            } else if let y = value as? Bool {
+                ad = NSAppleEventDescriptor(boolean: y)
+            } else if let y = value as? Int {
+  
+                ad = NSAppleEventDescriptor(int32: sint32(y))
+            } else  {
+                ad =  NSAppleEventDescriptor(listDescriptor: ())
+            }
+            theRecord.insert(ad, at: 0)
+            eventList.insert(theRecord, at: 0)
+            return
+        }
+
+        record.insert(NSAppleEventDescriptor(string:client), at: 0)
+        record.insert(eventList, at: 0)
+        
+        return record
+    }
+    
+    @objc public override func performDefaultImplementation() -> Any? {
+        let arguments = evaluatedArguments()
+        let client = arguments["id"] as? String ?? UUID().uuidString
+        let clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
+        
+    
+        guard !AccessoryTrackedGetterScripter.isConnectedStore.contains(client) else {
+            
+            // messed up situation
+            AccessoryTrackedGetterScripter.historyStore[client] = []
+            AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
+
+            AccessoryTrackedGetterScripter.resumerStore[client]?(eventToRecord([client : clientHistory]))
+            AccessoryTrackedGetterScripter.resumerStore[client] = nil
+
+            return eventToRecord([client : clientHistory])
+        }
+        
+        AccessoryTrackedGetterScripter.isConnectedStore.insert(client)
+        if arguments["id"] as? String == nil {
+            var cont : AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]>.Continuation?
+            let stream = AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]> { continuation in
+                AccessoryTrackedGetterScripter.continuationStore[client] = continuation
+                cont = continuation
+            }
+            guard let cont else {
+                fatalError("continuation is nill")
+            }
+            // needs a setter
+            AccessoryFinder.shared.dataStoreContinuations.append(cont)
+            AccessoryTrackedGetterScripter.logger.info("Starting streaming for client \(client)")
+            AccessoryTrackedGetterScripter.taskStore[client] = Task {
+                for await entry in stream {
+                    var clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
+                    clientHistory.append(entry)
+
+                    if AccessoryTrackedGetterScripter.isConnectedStore.contains(client) {
+                        AccessoryTrackedGetterScripter.timerTaskStore[client]?.cancel()
+                        AccessoryTrackedGetterScripter.timerTaskStore[client] = nil
+                        AccessoryTrackedGetterScripter.historyStore[client] = []
+                        AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
+                        AccessoryTrackedGetterScripter.resumerStore[client]?(eventToRecord([client : clientHistory]))
+                        AccessoryTrackedGetterScripter.resumerStore[client] = nil
+
+                    } else {
+                        AccessoryTrackedGetterScripter.historyStore[client] = clientHistory
+                    }
+                }
+                AccessoryTrackedGetterScripter.logger.info("Stopped streaming for client \(client)")
+            }
+        }
+
+        // TODO: timeout to flush and return what we have
+        var timeout = 60.0
+        
+        if let argTimeout = arguments["timeout"], let timeoutNumber = argTimeout as? NSNumber {
+            timeout = Double(timeoutNumber.doubleValue)
+        }
+        
+        AccessoryTrackedGetterScripter.timerTaskStore[client] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(timeout))
+            if Task.isCancelled { return }
+            if AccessoryTrackedGetterScripter.isConnectedStore.contains(client) {
+                let clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
+                AccessoryTrackedGetterScripter.historyStore[client] = []
+                AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
+                AccessoryTrackedGetterScripter.resumerStore[client]?(self?.eventToRecord([client : clientHistory]))
+                AccessoryTrackedGetterScripter.resumerStore[client] = nil
+                AccessoryTrackedGetterScripter.timerTaskStore[client] = nil
+            }
+        }
+        AccessoryTrackedGetterScripter.resumerStore[client] = { [weak self]  result in
+            self?.resumeExecution(withResult: result)
+        }
         suspendExecution()
         return nil
     }

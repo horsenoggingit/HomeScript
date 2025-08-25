@@ -59,6 +59,8 @@ class AccessoryFinder {
     // Key(Home:Room:Accessory) : [Service : [ Characteristic : Last read value] ] ]
     var dataStore = [AFAccessoryNameContainer : [String : [String: Any?]]]()
     
+    var dataStoreContinuations = [AsyncStream<[AFAccessoryNameContainer : [String : [String : Any? ]]]>.Continuation]()
+    
     // write error history
     var writeErrors = [Error]()
 
@@ -83,6 +85,22 @@ class AccessoryFinder {
         } else {
             self.dataStore[key] = [serviceName : [characteristicName: value]]
         }
+        
+        // distribute the update
+        var indexes = [Int]()
+        
+        for (index, cont) in self.dataStoreContinuations.enumerated() {
+            switch cont.yield([key: [serviceName : [characteristicName: value]]]) {
+            case .terminated:
+                indexes.insert(index, at: 0)
+            default:
+                break
+            }
+        }
+        
+        for index in indexes.reversed() {
+            self.dataStoreContinuations.remove(at: index)
+       }
     }
     
     // read the latest value of a stored characteristic from the datastore

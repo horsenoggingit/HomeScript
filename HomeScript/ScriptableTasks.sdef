@@ -14,6 +14,14 @@
                         <type type="text" list="yes"/>
             </result>
         </command>
+        <command name="stream" code="HSPTstrm" description="Streams all tracked accessory changes">
+            <cocoa class="HomeScript.AccessoryTrackedGetterScripter"/>
+            <parameter name="id" type="text" code="idcl" optional="yes" description="The accessory name."/>
+            <parameter name="timeout" type="number" code="tmo1" optional="yes" description="The discovery timeout."/>
+            <result  description="The record of events that have occured.">
+                        <type type="any"/>
+            </result>
+        </command>
         <command name="browse" code="HSPTtget" description="Gets a characteristic Value">
             <cocoa class="HomeScript.AccessoryGetterScripter"/>
             <parameter name="characteristic" type="text" code="cha1" description="The characteristic name."/>
