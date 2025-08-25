@@ -251,7 +251,7 @@ class AccessoryFinder {
     }
     
     
-    private func getTargetAccessorNamed(_ accessoryName: String, inRoomNamed: String, inHome: HSKHome) async -> HMAccessory? {
+    private func getTargetAccessorNamed(_ accessoryName: String, inRoomNamed: String, inHome: HSKHome) async throws -> HMAccessory? {
         var homeContuation : AsyncStream<HSKHomeEventEnum>.Continuation?
         let homeStream = AsyncStream<HSKHomeEventEnum> { cont in
             homeContuation = cont
@@ -263,7 +263,8 @@ class AccessoryFinder {
         if let storedHome = self.trackedHomes[inHome.home.name] {
             if storedHome.home.uniqueIdentifier != inHome.home.uniqueIdentifier {
                 logger.error("Different IDs for homes with name \(inHome.home.name)")
-                return nil
+                throw NSError(domain: "AccessoryFinder", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Different IDs for homes with name \(inHome.home.name)"])
             }
         } else {
             self.trackedHomes[inHome.home.name] = inHome
@@ -284,37 +285,43 @@ class AccessoryFinder {
                 break
             }
         }
+
         return targetAccessory
-        
     }
     
     // dymaically track accessory value changes and update the datastore
-    func trackAccessoryNamed(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String, resultWrittenCallback: ((AFAccessoryNameContainer?) -> Void)? = nil) async -> AFAccessoryNameContainer? {
+    func trackAccessoryNamed(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String, resultWrittenCallback: ((AFAccessoryNameContainer?) -> Void)? = nil, statusCallback: ((String) -> Void)? = nil) async throws -> AFAccessoryNameContainer? {
         var resultWritten = false
         let keyName = AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)
         logger.info("Starting track of \(keyName)")
+        statusCallback?("Starting track of \(keyName)")
         guard trackedAccessories[keyName] == nil else {
             logger.info("Accessory already tracked of \(keyName)")
             resultWrittenCallback?(keyName)
+            statusCallback?("Tracking already started for \(keyName)")
             return keyName
         }
         
         let targetHome: HSKHome
-        
+    
+        statusCallback?("Looking for home: \(inHomeNamed)")
         if let storedHome = trackedHomes[inHomeNamed] {
             logger.info("Reusing home \(inHomeNamed)")
             targetHome = storedHome
         } else {
             guard let newHome = await getTargetHome(inHomeNamed) else {
-                resultWrittenCallback?(nil)
+                logger.info("Get getTargetHome loop aborted")
                 return nil
             }
+            
             logger.info("Tracking new home \(inHomeNamed)")
+            
             targetHome = await HSKHome(home: newHome)
         }
-        
-        guard let targetAccessory = await getTargetAccessorNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
-            resultWrittenCallback?(nil)
+       
+        statusCallback?("Looking for accessory \(accessoryName) in room \(inRoomNamed)")
+        guard let targetAccessory = try await getTargetAccessorNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
+            logger.info("Get getTargetAccessorNamed loop aborted")
             return nil
         }
         
@@ -337,8 +344,8 @@ class AccessoryFinder {
         var accessoryServices = accessory.accessory.services
         
         trackedAccessories[keyName] = targetAccessory
-        logger.info("Tracking tracking accessory \(keyName.description)")
-        
+        logger.info("Tracking accessory \(keyName.description)")
+        statusCallback?("Tracking accessory \(keyName.description)")
         for await event in accessoryStream {
             switch event {
             case .characteristicValueUpdated(let service, let characteristic, let value):
@@ -359,8 +366,12 @@ class AccessoryFinder {
                 }
             }
         }
-        logger.info("Accessory tracking complete for \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
-        return keyName
+        logger.info("Accessory tracking complete for \(keyName.description)")
+        statusCallback?("Accessory tracking complete for \(keyName.description)")
+        // tracking is complete. The datasotre will no longer update
+        self.trackedAccessories.removeValue(forKey: keyName)
+        // retunring nill becasue the accessory is no longer tracked
+        return nil
     }
     
     

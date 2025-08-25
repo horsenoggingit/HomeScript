@@ -9,6 +9,7 @@
             <parameter name="accessory" type="text" code="acce" description="The accessory name."/>
             <parameter name="room" type="text" code="room" description="The accessory room."/>
             <parameter name="home" type="text" code="hom1" description="The accessory home."/>
+            <parameter name="timeout" type="number" code="tmot" optional="yes" description="The discovery timeout."/>
             <result  description="The list of accessory room and home.">
                         <type type="text" list="yes"/>
             </result>

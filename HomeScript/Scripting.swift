@@ -43,18 +43,48 @@ class Scripting: NSObject {
 class AccessoryFinderScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         let arguments = evaluatedArguments()
-        
-        Task { [weak self] in
-            _ = await AccessoryFinder.shared.trackAccessoryNamed(arguments["accessory"] as! String,
-                                                              inRoomNamed: arguments["room"] as! String,
-                                                                       inHomeNamed: arguments["home"] as! String, resultWrittenCallback: { r in
-                let result = r?.array().reduce(into: NSMutableArray()) { partialResult, str in
-                        partialResult.add(NSString(string: str))
-                }
-                self?.resumeExecution(withResult: result)
-            })
-                        
+        var task : Task<Void, Never>?
+        task = Task { [weak self] in
+            var trackingStatus : String = "Not Started"
+            var timeout = 60.0
+            
+            if let argTimeout = arguments["timeout"], let timeoutNumber = argTimeout as? NSNumber {
+                timeout = Double(timeoutNumber.doubleValue)
+            }
+            
+            let timerTask = Task {
+                try? await Task.sleep(for: .seconds(timeout))
+                    task?.cancel()
+                self?.scriptErrorNumber = -42
+                self?.scriptErrorString = "Timeout trying to find accessory: \(arguments["accessory"] as! String), \(arguments["room"] as! String), \(arguments["home"] as! String) whle tracking status was: \(trackingStatus)"
+                self?.resumeExecution(withResult: {})
+            }
+            
+            do {
+                _ = try await AccessoryFinder.shared.trackAccessoryNamed(arguments["accessory"] as! String,
+                                                                  inRoomNamed: arguments["room"] as! String,
+                                                                           inHomeNamed: arguments["home"] as! String, resultWrittenCallback: { r in
+                    let result = r?.array().reduce(into: NSMutableArray()) { partialResult, str in
+                            partialResult.add(NSString(string: str))
+                    }
+                    self?.resumeExecution(withResult: result)
+                }, statusCallback: { status in
+                    trackingStatus = status
+                })
+                   
+            } catch {
+                let nsError = error as NSError
+                self?.scriptErrorNumber = -42 - nsError.code
+                self?.scriptErrorString = error.localizedDescription
+                self?.resumeExecution(withResult: {})
+            }
+              
+            timerTask.cancel()
         }
+        
+        
+        
+
         suspendExecution()
         return nil
     }
