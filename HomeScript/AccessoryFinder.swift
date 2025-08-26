@@ -47,7 +47,8 @@ struct AFAccessoryNameContainer : Hashable, CustomStringConvertible {
 @MainActor
 class AccessoryFinder {
     static let shared = AccessoryFinder()
-    
+    static let characteristicValueDateSuffix = ".dateUpdated"
+
     let homeManager = HSKHomeManager()
     let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "AccessoryFinder")
 
@@ -75,7 +76,7 @@ class AccessoryFinder {
     // update an entry in the datastore
     func updateDataStore(key: AFAccessoryNameContainer, serviceName: String, characteristicName : String, value: Any?) {
  
-        let valueDict = [characteristicName: value]
+        let valueDict = [characteristicName: value, characteristicName + AccessoryFinder.characteristicValueDateSuffix: Date()]
         
         if var stored = self.dataStore[key] {
             if var inner = stored[serviceName] {

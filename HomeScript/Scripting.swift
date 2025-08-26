@@ -161,7 +161,9 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return eventDict
         }
         eventDict["service"] = service
-        guard let characteristic = event[accessory]?[service]?.keys.first else {
+        guard let characteristic = event[accessory]?[service]?.keys.first(where: { characterisitc in
+            !characterisitc.hasSuffix(AccessoryFinder.characteristicValueDateSuffix)
+        }) else {
             return eventDict
         }
         eventDict["characteristic"] = characteristic
@@ -169,6 +171,13 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return eventDict
         }
         eventDict["value"] = value
+        guard let dateUpdated = event[accessory]?[service]?[characteristic + AccessoryFinder.characteristicValueDateSuffix] as? Date else {
+            return eventDict
+        }
+        var format = Date.ISO8601FormatStyle()
+        format.timeZone = .current
+        
+        eventDict["updated"] = dateUpdated.ISO8601Format(format)
 
         return eventDict
     }
@@ -177,10 +186,6 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         return events.reduce(into: NSAppleEventDescriptor(listDescriptor: ())) { partialResult, event in
             partialResult.insert(dictToRecord(eventDictToDict(event)) , at: 0)
         }
-    }
-    
-    func composeEventDict(client: String, date: Date, history: [[AFAccessoryNameContainer : [String : [String: Any?]]]]) -> NSAppleEventDescriptor {
-        dictToRecord(["client" : client, "eventHistory" : history, "date" : String(date.timeIntervalSince1970)])
     }
     
     func finishClientConnection(_ client: String, clientHistory:  [[AFAccessoryNameContainer : [String : [String: Any?]]]]) {
@@ -234,7 +239,6 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             }
         }
 
-        // TODO: timeout to flush and return what we have
         var timeout = 60.0
         
         if let argTimeout = arguments["timeout"], let timeoutNumber = argTimeout as? NSNumber {
