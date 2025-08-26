@@ -74,23 +74,26 @@ class AccessoryFinder {
     
     // update an entry in the datastore
     func updateDataStore(key: AFAccessoryNameContainer, serviceName: String, characteristicName : String, value: Any?) {
+ 
+        let valueDict = [characteristicName: value]
+        
         if var stored = self.dataStore[key] {
             if var inner = stored[serviceName] {
                 inner[characteristicName] = value
                 stored[serviceName] = inner
             } else {
-                stored[serviceName] = [characteristicName : value]
+                stored[serviceName] = valueDict
             }
             self.dataStore[key] = stored
         } else {
-            self.dataStore[key] = [serviceName : [characteristicName: value]]
+            self.dataStore[key] = [serviceName : valueDict]
         }
         
         // distribute the update
         var indexes = [Int]()
         
         for (index, cont) in self.dataStoreContinuations.enumerated() {
-            switch cont.yield([key: [serviceName : [characteristicName: value]]]) {
+            switch cont.yield([key: [serviceName : valueDict]]) {
             case .terminated:
                 indexes.insert(index, at: 0)
             default:

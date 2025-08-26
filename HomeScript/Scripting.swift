@@ -102,67 +102,94 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
     static let logger = Logger()
     static var resumerStore = [String: (NSAppleEventDescriptor?) -> Void]()
     
-    func eventToRecord(_ event :[String: [[AFAccessoryNameContainer : [String : [String: Any?]]]]]) -> NSAppleEventDescriptor? {
-        let record = NSAppleEventDescriptor(listDescriptor: ())
-        
-        let client = event.keys.first
-        guard let client else {
-            return nil
+    func fourCharCode(from string: String) -> FourCharCode {
+        assert(string.count == 4, "String length must be 4")
+        var result: FourCharCode = 0
+        for char in string.utf16 { // Using UTF-16 for character representation
+            result = (result << 8) + FourCharCode(char)
         }
+        return result
+    }
+    
+    func dictToRecord(_ dict: [String: Any?]) -> NSAppleEventDescriptor {
+        let recDesc = NSAppleEventDescriptor(recordDescriptor: ())
+        let userProperties = NSAppleEventDescriptor(listDescriptor: ())
         
-        let clientEvents = event[client] ?? []
-        
-        let eventList = NSAppleEventDescriptor(listDescriptor: ())
-        
-        
-        clientEvents.forEach { event in
-            let theRecord = NSAppleEventDescriptor(listDescriptor: ())
-            let accessory = event.keys.first
-            guard let accessory else {
-                eventList.insert(theRecord, at: 0)
-                return
-            }
-            let listRecord = NSAppleEventDescriptor(listDescriptor: ())
-            accessory.array().forEach { item in
-                listRecord.insert(NSAppleEventDescriptor(string: item), at: 0)
-            }
-            theRecord.insert(listRecord, at: 0)
-            let service = event[accessory]?.keys.first
-            guard let service else {
-                eventList.insert(theRecord, at: 0)
-                return
-            }
-            theRecord.insert(NSAppleEventDescriptor(string: service), at: 0)
+        for key in dict.keys {
+            let keyDesc = NSAppleEventDescriptor(string: key)
+            userProperties.insert(keyDesc, at: 0)
             
-            guard let characteristic = event[accessory]?[service]?.keys.first else {
-                eventList.insert(theRecord, at: 0)
-                return
-            }
-            theRecord.insert(NSAppleEventDescriptor(string:characteristic), at: 0)
-
-            let value = event[accessory]?[service]?[characteristic]
+            let value = dict[key]
+            
             let ad : NSAppleEventDescriptor
             if value == nil {
                 ad = NSAppleEventDescriptor(listDescriptor: ())
             } else if let y = value as? String {
                 ad = NSAppleEventDescriptor(string: y)
+            } else if let y = value as? Int {
+                ad = NSAppleEventDescriptor(int32: sint32(y))
             } else if let y = value as? Bool {
                 ad = NSAppleEventDescriptor(boolean: y)
-            } else if let y = value as? Int {
-  
-                ad = NSAppleEventDescriptor(int32: sint32(y))
-            } else  {
+            }  else if let y = value as? [[AFAccessoryNameContainer : [String : [String: Any?]]]] {
+                ad = eventArrayToRecord(y)
+            } else if let y = value as? [String : Any?] {
+                ad = dictToRecord(y)
+            } else if let y = value as? [String] {
+               ad = y.reduce(into: NSAppleEventDescriptor(listDescriptor: ())) { partialResult, aString in
+                   partialResult.insert(NSAppleEventDescriptor(string: aString), at: 0)
+                }
+            }
+            else  {
                 ad =  NSAppleEventDescriptor(listDescriptor: ())
             }
-            theRecord.insert(ad, at: 0)
-            eventList.insert(theRecord, at: 0)
-            return
+            userProperties.insert(ad, at: 0)
         }
+        let kw = fourCharCode(from: "usrf") // keyASUserRecordFields from Cocoa
+        recDesc.setDescriptor(userProperties, forKeyword: kw)
+        return recDesc
+    }
+    
+    func eventDictToDict(_ event: [AFAccessoryNameContainer : [String : [String: Any?]]]) -> [String : Any?] {
+        var eventDict = [String : Any]()
+        let accessory = event.keys.first
+        guard let accessory else {
+            return eventDict
+        }
+        eventDict["accessory"] = accessory.array()
+        let service = event[accessory]?.keys.first
+        guard let service else {
+            return eventDict
+        }
+        eventDict["service"] = service
+        guard let characteristic = event[accessory]?[service]?.keys.first else {
+            return eventDict
+        }
+        eventDict["characteristic"] = characteristic
+        guard let value = event[accessory]?[service]?[characteristic] else {
+            return eventDict
+        }
+        eventDict["value"] = value
 
-        record.insert(NSAppleEventDescriptor(string:client), at: 0)
-        record.insert(eventList, at: 0)
-        
-        return record
+        return eventDict
+    }
+    
+    func eventArrayToRecord(_ events: [[AFAccessoryNameContainer : [String : [String: Any?]]]]) -> NSAppleEventDescriptor {
+        return events.reduce(into: NSAppleEventDescriptor(listDescriptor: ())) { partialResult, event in
+            partialResult.insert(dictToRecord(eventDictToDict(event)) , at: 0)
+        }
+    }
+    
+    func composeEventDict(client: String, date: Date, history: [[AFAccessoryNameContainer : [String : [String: Any?]]]]) -> NSAppleEventDescriptor {
+        dictToRecord(["client" : client, "eventHistory" : history, "date" : String(date.timeIntervalSince1970)])
+    }
+    
+    func finishClientConnection(_ client: String, clientHistory:  [[AFAccessoryNameContainer : [String : [String: Any?]]]]) {
+        AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
+        AccessoryTrackedGetterScripter.timerTaskStore[client]?.cancel()
+        AccessoryTrackedGetterScripter.timerTaskStore[client] = nil
+        AccessoryTrackedGetterScripter.historyStore[client] = []
+        AccessoryTrackedGetterScripter.resumerStore[client]?(dictToRecord(["client" : client, "eventHistory" : clientHistory]))
+        AccessoryTrackedGetterScripter.resumerStore[client] = nil
     }
     
     @objc public override func performDefaultImplementation() -> Any? {
@@ -174,13 +201,8 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         guard !AccessoryTrackedGetterScripter.isConnectedStore.contains(client) else {
             
             // messed up situation
-            AccessoryTrackedGetterScripter.historyStore[client] = []
-            AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
-
-            AccessoryTrackedGetterScripter.resumerStore[client]?(eventToRecord([client : clientHistory]))
-            AccessoryTrackedGetterScripter.resumerStore[client] = nil
-
-            return eventToRecord([client : clientHistory])
+            finishClientConnection(client, clientHistory: clientHistory)
+            return dictToRecord(["client" : client, "events" : clientHistory])
         }
         
         AccessoryTrackedGetterScripter.isConnectedStore.insert(client)
@@ -191,24 +213,19 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
                 cont = continuation
             }
             guard let cont else {
-                fatalError("continuation is nill")
+                fatalError("continuation is nil")
             }
             // needs a setter
             AccessoryFinder.shared.dataStoreContinuations.append(cont)
             AccessoryTrackedGetterScripter.logger.info("Starting streaming for client \(client)")
             AccessoryTrackedGetterScripter.taskStore[client] = Task {
                 for await entry in stream {
+                    // add time to entry
                     var clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
                     clientHistory.append(entry)
 
                     if AccessoryTrackedGetterScripter.isConnectedStore.contains(client) {
-                        AccessoryTrackedGetterScripter.timerTaskStore[client]?.cancel()
-                        AccessoryTrackedGetterScripter.timerTaskStore[client] = nil
-                        AccessoryTrackedGetterScripter.historyStore[client] = []
-                        AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
-                        AccessoryTrackedGetterScripter.resumerStore[client]?(eventToRecord([client : clientHistory]))
-                        AccessoryTrackedGetterScripter.resumerStore[client] = nil
-
+                        finishClientConnection(client, clientHistory: clientHistory)
                     } else {
                         AccessoryTrackedGetterScripter.historyStore[client] = clientHistory
                     }
@@ -229,11 +246,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             if Task.isCancelled { return }
             if AccessoryTrackedGetterScripter.isConnectedStore.contains(client) {
                 let clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
-                AccessoryTrackedGetterScripter.historyStore[client] = []
-                AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
-                AccessoryTrackedGetterScripter.resumerStore[client]?(self?.eventToRecord([client : clientHistory]))
-                AccessoryTrackedGetterScripter.resumerStore[client] = nil
-                AccessoryTrackedGetterScripter.timerTaskStore[client] = nil
+                self?.finishClientConnection(client, clientHistory: clientHistory)
             }
         }
         AccessoryTrackedGetterScripter.resumerStore[client] = { [weak self]  result in
@@ -266,12 +279,12 @@ class AccessoryGetterScripter: NSScriptCommand {
         if let y = x as? String {
             return NSString(string: y)
         }
-
-        if let y = x as? Bool {
+        
+        if let y = x as? Int {
             return NSNumber(value: y)
         }
         
-        if let y = x as? Int {
+        if let y = x as? Bool {
             return NSNumber(value: y)
         }
         
@@ -385,11 +398,10 @@ class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
                 ad = NSAppleEventDescriptor(listDescriptor: ())
             } else if let y = x as? String {
                 ad = NSAppleEventDescriptor(string: y)
+            } else if let y = x as? Int {
+                ad = NSAppleEventDescriptor(int32: sint32(y))
             } else if let y = x as? Bool {
                 ad = NSAppleEventDescriptor(boolean: y)
-            } else if let y = x as? Int {
-  
-                ad = NSAppleEventDescriptor(int32: sint32(y))
             } else  {
                 ad =  NSAppleEventDescriptor(listDescriptor: ())
             }
