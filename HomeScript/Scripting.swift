@@ -221,7 +221,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
                 fatalError("continuation is nil")
             }
             // needs a setter
-            AccessoryFinder.shared.dataStoreContinuations.append(cont)
+            AccessoryFinder.shared.addDataStoreContinuation(cont)
             AccessoryTrackedGetterScripter.logger.info("Starting streaming for client \(client)")
             AccessoryTrackedGetterScripter.taskStore[client] = Task {
                 for await entry in stream {

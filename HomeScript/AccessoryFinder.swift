@@ -49,21 +49,25 @@ class AccessoryFinder {
     static let shared = AccessoryFinder()
     static let characteristicValueDateSuffix = ".dateUpdated"
 
-    let homeManager = HSKHomeManager()
-    let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "AccessoryFinder")
+    private let homeManager = HSKHomeManager()
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "AccessoryFinder")
 
-    var trackedHomes = [String: HSKHome]()
+    private var trackedHomes = [String: HSKHome]()
     
     // fast aaccess to the tracked accessories
-    var trackedAccessories = [AFAccessoryNameContainer : HMAccessory]()
+    private var trackedAccessories = [AFAccessoryNameContainer : HMAccessory]()
     // Keep track of the relationships between objects
     // Key(Home:Room:Accessory) : [Service : [ Characteristic : Last read value] ] ]
-    var dataStore = [AFAccessoryNameContainer : [String : [String: Any?]]]()
+    private var dataStore = [AFAccessoryNameContainer : [String : [String: Any?]]]()
     
-    var dataStoreContinuations = [AsyncStream<[AFAccessoryNameContainer : [String : [String : Any? ]]]>.Continuation]()
+    private var dataStoreContinuations = [AsyncStream<[AFAccessoryNameContainer : [String : [String : Any? ]]]>.Continuation]()
+    
+    func addDataStoreContinuation(_ continuation: AsyncStream<[AFAccessoryNameContainer : [String : [String : Any? ]]]>.Continuation) {
+        self.dataStoreContinuations.append(continuation)
+    }
     
     // write error history
-    var writeErrors = [Error]()
+    private var writeErrors = [Error]()
 
     func clearWriteErrors() {
         self.writeErrors.removeAll()
@@ -164,10 +168,18 @@ class AccessoryFinder {
         .sorted()
     }
     
+    func readStoredServicesCharacteristicsAndValuesForAccessory(_ accessory: AFAccessoryNameContainer) -> [String:  [String: Any?]]? {
+        dataStore[accessory]
+    }
+    
+    func readStoredCharacteristicsAndValuesForService(_ serviceName: String, accessory: AFAccessoryNameContainer) -> [String: Any?]? {
+        dataStore[accessory]?[serviceName]
+    }
+    
     // read the all the values for all the characteristics of a service of a stored accessory
     // sorted in alpha order of the characteristics
-    func readStoredValuesForCharacteristicsForService(_ serviceName: String, accesory: AFAccessoryNameContainer) -> [Any?]? {
-        let characteristicsValues = dataStore[accesory]?[serviceName]
+    func readStoredValuesForCharacteristicsForService(_ serviceName: String, accessory: AFAccessoryNameContainer) -> [Any?]? {
+        let characteristicsValues = dataStore[accessory]?[serviceName]
         guard let characteristicsValues else {
             // means there is no information available
             return nil
