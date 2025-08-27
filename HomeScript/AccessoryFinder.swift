@@ -222,8 +222,8 @@ class AccessoryFinder {
     
     // a list of all the tracked accessories, their rooms and homes
     func readTrackedAccessories() -> [[String]] {
-        let x = dataStore.keys.map { keyContainer in
-            [keyContainer.name, keyContainer.room, keyContainer.home]
+        let x = dataStore.keys.map {
+            $0.array()
         }
         return x
     }

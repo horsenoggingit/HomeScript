@@ -197,7 +197,7 @@ class AccessoryFinderScripter: NSScriptCommand {
     }
 }
 
-// wait for new events to occur on all tracked accessories before returning
+// wait for new events to occur on any tracked accessories before returning
 //
 // opt param client : String, UUID string of a an existing session, if nil a new session is created
 // opt param timeout : Number, the duration the this API will hold AS execution until returning when no events occur
@@ -370,7 +370,18 @@ class AccessorySetterScripter: NSScriptCommand {
 }
 
 
-
+// read the services in a stored accessory from the datastore
+// filter for service starting with a pattern (e.g. "Light"
+// filter for services with certain characteristics
+// filter for specific values associated with those characteristics
+// this way you can filter for "Light" with "Power State" that is 1
+//
+// opt param starting, leading characters of the service
+// opt param characteristicStarting, leading characters of the service's characteristic
+// opt param value, value of any applicable characteristic
+// param accessory : Array[accessory, room, home]
+//
+// return a list of services
 @MainActor
 @objc
 class AccessoryServicesForAccessoryScripter: NSScriptCommand {
@@ -390,7 +401,8 @@ class AccessoryServicesForAccessoryScripter: NSScriptCommand {
     }
 }
 
-
+// returns a list of all the tracked accessories
+// return [[accesory, room, home]]
 @MainActor
 @objc
 class AccessoryTrackedAccessoriesScripter: NSScriptCommand {
@@ -408,6 +420,12 @@ class AccessoryTrackedAccessoriesScripter: NSScriptCommand {
     }
 }
 
+// read all the characteristics and values for a service
+//
+// param service : String
+// param accessory : Array[accessory, room, home]
+//
+// retrun record [ characteristic : value ]
 @MainActor
 @objc
 class AccessoryTrackedCharacteristicsAndValuesForServiceScripter: NSScriptCommand {
@@ -426,6 +444,12 @@ class AccessoryTrackedCharacteristicsAndValuesForServiceScripter: NSScriptComman
     }
 }
 
+// read all the characteristics for a service
+//
+// param service : String
+// param accessory : Array[accessory, room, home]
+//
+// retrun record [ characteristic ], characteristics are in alpha order
 @MainActor
 @objc
 class AccessoryTrackedCharacteristicsForServiceScripter: NSScriptCommand {
@@ -442,6 +466,12 @@ class AccessoryTrackedCharacteristicsForServiceScripter: NSScriptCommand {
     }
 }
 
+// read all the values for a service's characteristics
+//
+// param service : String
+// param accessory : Array[accessory, room, home]
+//
+// retrun record [ values ], values are in alpha order of the characteristics
 @MainActor
 @objc
 class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
