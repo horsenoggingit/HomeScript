@@ -2,7 +2,6 @@
 //  Scripting.swift
 //  CatalystAppleScript
 //
-//  Created by Steven Troughton-Smith on 05/06/2021.
 //
 
 #if targetEnvironment(macCatalyst)
