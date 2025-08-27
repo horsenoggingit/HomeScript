@@ -12,32 +12,32 @@ import os
 
 // This is copied from the internets...
 class Scripting: NSObject {
-	
-	class func enableScripting() {
-		
-		/*
-		Catalyst doesn't have access to the regular NSApplication or AppKit application delegate.
-		This is just one method to swizzle NSApplication and process scripting events as they happen
-		*/
-		
-		do {
-			let m1 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("valueForKey:"))
-			let m2 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("MyAppScriptingValueForKey:"))
-			
-			if let m1 = m1, let m2 = m2 {
-				method_exchangeImplementations(m1, m2)
-			}
-		}
-		
-		do {
-			let m1 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("setValue:forKey:"))
-			let m2 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("MyAppScriptingSetValue:forKey:"))
-			
-			if let m1 = m1, let m2 = m2 {
-				method_exchangeImplementations(m1, m2)
-			}
-		}
-	}
+    
+    class func enableScripting() {
+        
+        /*
+         Catalyst doesn't have access to the regular NSApplication or AppKit application delegate.
+         This is just one method to swizzle NSApplication and process scripting events as they happen
+         */
+        
+        do {
+            let m1 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("valueForKey:"))
+            let m2 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("MyAppScriptingValueForKey:"))
+            
+            if let m1 = m1, let m2 = m2 {
+                method_exchangeImplementations(m1, m2)
+            }
+        }
+        
+        do {
+            let m1 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("setValue:forKey:"))
+            let m2 = class_getInstanceMethod(NSClassFromString("NSApplication"), NSSelectorFromString("MyAppScriptingSetValue:forKey:"))
+            
+            if let m1 = m1, let m2 = m2 {
+                method_exchangeImplementations(m1, m2)
+            }
+        }
+    }
 }
 
 // utilitis for converting Dictionaries into Records
@@ -82,10 +82,10 @@ class RecordUtilities {
         format.timeZone = .current
         
         eventDict["updated"] = dateUpdated.ISO8601Format(format)
-
+        
         return eventDict
     }
-
+    
     // convert an array of event dictionaries into a list of records
     static func eventArrayToRecord(_ events: [[AFAccessoryNameContainer : [String : [String: Any?]]]]) -> NSAppleEventDescriptor {
         return events.reduce(into: NSAppleEventDescriptor(listDescriptor: ())) { partialResult, event in
@@ -119,8 +119,8 @@ class RecordUtilities {
             } else if let y = value as? [String : Any?] {
                 ad = dictToRecord(y)
             } else if let y = value as? [String] {
-               ad = y.reduce(into: NSAppleEventDescriptor(listDescriptor: ())) { partialResult, aString in
-                   partialResult.insert(NSAppleEventDescriptor(string: aString), at: 0)
+                ad = y.reduce(into: NSAppleEventDescriptor(listDescriptor: ())) { partialResult, aString in
+                    partialResult.insert(NSAppleEventDescriptor(string: aString), at: 0)
                 }
             } else if let y = value as? Date {
                 var format = Date.ISO8601FormatStyle()
@@ -171,27 +171,27 @@ class AccessoryFinderScripter: NSScriptCommand {
             
             do {
                 _ = try await AccessoryFinder.shared.trackAccessoryNamed(arguments["accessory"] as! String,
-                                                                  inRoomNamed: arguments["room"] as! String,
-                                                                           inHomeNamed: arguments["home"] as! String, resultWrittenCallback: { r in
+                                                                         inRoomNamed: arguments["room"] as! String,
+                                                                         inHomeNamed: arguments["home"] as! String, resultWrittenCallback: { r in
                     let result = r?.array().reduce(into: NSMutableArray()) { partialResult, str in
-                            partialResult.add(NSString(string: str))
+                        partialResult.add(NSString(string: str))
                     }
                     timerTask.cancel()
                     self?.resumeExecution(withResult: result)
                 }, statusCallback: { status in
                     trackingStatus = status
                 })
-                   
+                
             } catch {
                 let nsError = error as NSError
                 self?.scriptErrorNumber = -42 - nsError.code
                 self?.scriptErrorString = error.localizedDescription
                 self?.resumeExecution(withResult: {})
             }
-              
+            
             timerTask.cancel()
         }
-
+        
         suspendExecution()
         return nil
     }
@@ -233,12 +233,51 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         AccessoryTrackedGetterScripter.resumerStore[client] = nil
     }
     
+    func allTrackedCharacteristicValuesAsEvents() -> [[AFAccessoryNameContainer : [String : [String: Any?]]]] {
+        let trackedAccessories = AccessoryFinder.shared.readTrackedAccessories()
+        
+        // return the state of every characteristinc that is currently being tracked when we start following
+        return trackedAccessories.compactMap{ accessory -> AFAccessoryNameContainer? in
+            // get a list of all the tracked accessories
+                return try? AFAccessoryNameContainer(accessory)
+            }
+            .flatMap { container -> [(AFAccessoryNameContainer,String)] in
+                // pair with all the services of those accessories
+                guard let services = AccessoryFinder.shared.readStoredServicesForAccessory(container) else {
+                    return []
+                }
+                return services.map { service in
+                    (container, service)
+                }
+            }
+            .flatMap { args -> [(AFAccessoryNameContainer, String, [String : Any?])] in
+                // pair again with all the characteristics and values
+                let (container, service) = args
+                guard let cnv = AccessoryFinder.shared.readStoredCharacteristicsAndValuesForService(service, accessory: container) else {
+                    return []
+                }
+                return cnv.compactMap { kv in
+                    // need to handle the last updated time as a special case
+                    if kv.key.hasSuffix(AccessoryFinder.characteristicValueDateSuffix) {
+                        return nil
+                    }
+                    return (container, service, [kv.key: kv.value,
+                                                 kv.key + AccessoryFinder.characteristicValueDateSuffix: cnv[kv.key + AccessoryFinder.characteristicValueDateSuffix] as Any?])
+                }
+            }
+            .map { args -> [AFAccessoryNameContainer : [String : [String : Any?]]] in
+                let (container, service, kv) = args
+                // turn this information into something that looks like an event
+                return [container : [service : kv]]
+            }
+    }
+    
     @objc public override func performDefaultImplementation() -> Any? {
         let arguments = evaluatedArguments()
         let client = arguments["id"] as? String ?? UUID().uuidString
         let clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
         
-    
+        
         guard !AccessoryTrackedGetterScripter.isConnectedStore.contains(client) else {
             
             // messed up situation
@@ -246,7 +285,6 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return RecordUtilities.dictToRecord(["client" : client, "events" : clientHistory])
         }
         
-        AccessoryTrackedGetterScripter.isConnectedStore.insert(client)
         if arguments["id"] as? String == nil {
             var cont : AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]>.Continuation?
             let stream = AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]> { continuation in
@@ -265,7 +303,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
                     // add time to entry
                     var clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
                     clientHistory.append(entry)
-
+                    
                     if AccessoryTrackedGetterScripter.isConnectedStore.contains(client) {
                         finishClientConnection(client, clientHistory: clientHistory)
                     } else {
@@ -274,8 +312,12 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
                 }
                 AccessoryTrackedGetterScripter.logger.info("Stopped streaming for client \(client)")
             }
-        }
 
+            return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : allTrackedCharacteristicValuesAsEvents()])
+        }
+        
+        AccessoryTrackedGetterScripter.isConnectedStore.insert(client)
+        
         var timeout = 60.0
         
         if let argTimeout = arguments["timeout"], let timeoutNumber = argTimeout as? NSNumber {
@@ -319,7 +361,7 @@ class AccessoryGetterScripter: NSScriptCommand {
         let x = AccessoryFinder.shared.readStoredCharacteristicNamed(name: arguments["characteristic"] as! String,
                                                                      serviceName: arguments["service"] as! String,
                                                                      accessory: accessory)
-   
+        
         guard let x else { return nil }
         
         if let y = x as? String {
@@ -360,7 +402,7 @@ class AccessorySetterScripter: NSScriptCommand {
         } catch {
             fatalError("Could not parse accessory name")
         }
-
+        
         _ = AccessoryFinder.shared.setTrackedAccessryCharacteristic(value: arguments[""],
                                                                     characteristicName: arguments["toCharacteristic"] as! String,
                                                                     serviceName: arguments["service"] as! String,
@@ -397,7 +439,7 @@ class AccessoryServicesForAccessoryScripter: NSScriptCommand {
         return AccessoryFinder.shared.readStoredServicesForAccessory(accessory, startingWith: arguments["starting"] as? String,
                                                                      characterissticStartingWith: arguments["characteristicStarting"] as? String,
                                                                      value: arguments["value"])
-       
+        
     }
 }
 
@@ -409,7 +451,7 @@ class AccessoryTrackedAccessoriesScripter: NSScriptCommand {
     @objc public override func performDefaultImplementation() -> Any? {
         
         //let arguments = evaluatedArguments()
-       
+        
         let x = AccessoryFinder.shared.readTrackedAccessories()
         
         let y = x.map { strArr in
@@ -484,14 +526,14 @@ class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
         } catch {
             fatalError("Could not parse accessory name")
         }
-
+        
         let list =  AccessoryFinder.shared.readStoredValuesForCharacteristicsForService(arguments["service"] as! String, accessory: accessory)
         
         guard let list else {
             return nil
         }
         let appleList = NSAppleEventDescriptor(listDescriptor: ())
- 
+        
         for x in list {
             let ad: NSAppleEventDescriptor
             if x == nil {
@@ -515,22 +557,22 @@ class AccessoryValueForCharacteristicsForServiceScripter: NSScriptCommand {
 
 
 extension NSObject {
-	@objc public func MyAppScriptingValueForKey(_ key:String) -> Any? {
-		
-		NSLog("[APPLESCRIPT] Querying value for \(key)")
-			
-		return self.MyAppScriptingValueForKey(key)
-	}
-	
-	@objc public func MyAppScriptingSetValue(_ value:Any, forKey:String) {
-		NSLog("[APPLESCRIPT] Setting value for \(forKey): \(String(describing:value))")
-		
-		return self.MyAppScriptingSetValue(value, forKey: forKey)
-	}
-	
-	@objc func evaluatedArguments() -> NSDictionary {
-		return NSDictionary()
-	}
+    @objc public func MyAppScriptingValueForKey(_ key:String) -> Any? {
+        
+        NSLog("[APPLESCRIPT] Querying value for \(key)")
+        
+        return self.MyAppScriptingValueForKey(key)
+    }
+    
+    @objc public func MyAppScriptingSetValue(_ value:Any, forKey:String) {
+        NSLog("[APPLESCRIPT] Setting value for \(forKey): \(String(describing:value))")
+        
+        return self.MyAppScriptingSetValue(value, forKey: forKey)
+    }
+    
+    @objc func evaluatedArguments() -> NSDictionary {
+        return NSDictionary()
+    }
 }
 
 #endif
