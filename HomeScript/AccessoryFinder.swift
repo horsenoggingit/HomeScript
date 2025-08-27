@@ -47,6 +47,8 @@ struct AFAccessoryNameContainer : Hashable, CustomStringConvertible {
 @MainActor
 class AccessoryFinder {
     static let shared = AccessoryFinder()
+
+    nonisolated
     static let characteristicValueDateSuffix = ".dateUpdated"
 
     private let homeManager = HSKHomeManager()
@@ -79,11 +81,15 @@ class AccessoryFinder {
     
     // update an entry in the datastore
     func updateDataStore(key: AFAccessoryNameContainer, serviceName: String, characteristicName : String, value: Any?) {
- 
+        // keep track of the time the event occured. This way we can tell when every characteristic was updated
         let valueDict = [characteristicName: value, characteristicName + AccessoryFinder.characteristicValueDateSuffix: Date()]
         
+        // add or merge the vaule dictionary into the data store
         if var stored = self.dataStore[key] {
             if var inner = stored[serviceName] {
+                inner.merge(valueDict) { _, newValue in
+                    newValue
+                }
                 inner[characteristicName] = value
                 stored[serviceName] = inner
             } else {
@@ -94,7 +100,7 @@ class AccessoryFinder {
             self.dataStore[key] = [serviceName : valueDict]
         }
         
-        // distribute the update
+        // distribute the update to individual async stream, removing any stream that has ended.
         var indexes = [Int]()
         
         for (index, cont) in self.dataStoreContinuations.enumerated() {
@@ -121,6 +127,10 @@ class AccessoryFinder {
     }
     
     // read the services in a stored accessory from the datastore
+    // filter for service starting with a pattern (e.g. "Light"
+    // filter for services with certain characteristics
+    // filter for specific values associated with those characteristics
+    // this way you can filter for "Light" with "Power State" that is 1
     func readStoredServicesForAccessory(_ accessory: AFAccessoryNameContainer, startingWith: String? = nil, characterissticStartingWith: String? = nil, value: Any? = nil) -> [String]? {
         let servicesValues = dataStore[accessory]
         guard let servicesValues else {
@@ -128,12 +138,14 @@ class AccessoryFinder {
             return nil
         }
         return servicesValues.keys.filter({ serviceKey in
+            // if there is no pattern for service just pass them all through
             guard let startingWith else {
                 return true
             }
             return serviceKey.starts(with: startingWith)
         })
         .filter({ serviceKey in
+            // if there is no pattern for characteristic just pass them all through
             guard let characterissticStartingWith else {
                 return true
             }
@@ -141,20 +153,23 @@ class AccessoryFinder {
             guard let cv = dataStore[accessory]?[serviceKey] else {
                 return false
             }
-            for (k, v) in cv {
+            // go through the characteristics and values
+            for (characteristic, cValue) in cv {
                 if value == nil {
-                    if k.starts(with: characterissticStartingWith) {
+                    // if no value specified the base decision on the characteristic name
+                    if characteristic.starts(with: characterissticStartingWith) {
                         return true
                     }
                 } else {
-                    if k.starts(with: characterissticStartingWith) {
-                        if let vv = v as? String, vv == value as? String {
+                    // match both characteristic and value
+                    if characteristic.starts(with: characterissticStartingWith) {
+                        if let vv = cValue as? String, vv == value as? String {
                             return true
                         }
-                        if let vv = v as? Int, vv == value as? Int {
+                        if let vv = cValue as? Int, vv == value as? Int {
                             return true
                         }
-                        if let vv = v as? Bool, vv == value as? Bool {
+                        if let vv = cValue as? Bool, vv == value as? Bool {
                             return true
                         }
                     }
@@ -168,10 +183,12 @@ class AccessoryFinder {
         .sorted()
     }
     
+    // All information about an accessorie
     func readStoredServicesCharacteristicsAndValuesForAccessory(_ accessory: AFAccessoryNameContainer) -> [String:  [String: Any?]]? {
         dataStore[accessory]
     }
     
+    // All information about a service
     func readStoredCharacteristicsAndValuesForService(_ serviceName: String, accessory: AFAccessoryNameContainer) -> [String: Any?]? {
         dataStore[accessory]?[serviceName]
     }
@@ -193,7 +210,7 @@ class AccessoryFinder {
         return sortedValues
     }
  
-    // read the all the haracteristics of a service of a stored accessory in alpha order
+    // read the all the characteristics of a service of a stored accessory in alpha order
     func readStoredCharacteristicsForService(_ serviceName: String, accessory: AFAccessoryNameContainer) -> [String]? {
         let characteristicsValues = dataStore[accessory]?[serviceName]
         guard let characteristicsValues else {
@@ -258,6 +275,9 @@ class AccessoryFinder {
     }
 
     // find a home - dynamically updates
+    // if the home isn't there the function will wait for it to be reported
+    // the caller is responsible for managing timeout
+    // this function will return nil if the continuation or enclosing task is cancelled
     private func getTargetHome(_ inHomeNamed: String) async -> HMHome? {
         var contuation : AsyncStream<HSKHomeManagerEventEnum>.Continuation?
         let stream = AsyncStream<HSKHomeManagerEventEnum> { cont in
@@ -284,8 +304,11 @@ class AccessoryFinder {
         return targetHome
     }
     
-    
-    private func getTargetAccessorNamed(_ accessoryName: String, inRoomNamed: String, inHome: HSKHome) async throws -> HMAccessory? {
+    // find an accessory in a room in a home
+    // if the accessory isn't there the function will wait for it to be reported
+    // the caller is responsible for managing timeout
+    // this function will return nil if the continuation or enclosing task is cancelled
+    private func getTargetAccessoryNamed(_ accessoryName: String, inRoomNamed: String, inHome: HSKHome) async throws -> HMAccessory? {
         var homeContuation : AsyncStream<HSKHomeEventEnum>.Continuation?
         let homeStream = AsyncStream<HSKHomeEventEnum> { cont in
             homeContuation = cont
@@ -294,6 +317,7 @@ class AccessoryFinder {
             fatalError("contuation nil")
         }
         
+        // cache the home now that we're looking for an accessory, make sure that any home with the same name has the same ID
         if let storedHome = self.trackedHomes[inHome.home.name] {
             if storedHome.home.uniqueIdentifier != inHome.home.uniqueIdentifier {
                 logger.error("Different IDs for homes with name \(inHome.home.name)")
@@ -323,12 +347,19 @@ class AccessoryFinder {
         return targetAccessory
     }
     
-    // dymaically track accessory value changes and update the datastore
+    // track accessory value changes and update the datastore
+    // tracking will listen to all characteristic changes
+    // calls resultWrittenCallback the first time an update is received from the accessory which signals it has been found
+    // since this is a multi-phase function statusCallback will be called with progress updates
+    // the caller is responsible for managing timeout
+    // this function will return nil if the continuation or enclosing task is cancelled
     func trackAccessoryNamed(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String, resultWrittenCallback: ((AFAccessoryNameContainer?) -> Void)? = nil, statusCallback: ((String) -> Void)? = nil) async throws -> AFAccessoryNameContainer? {
         var resultWritten = false
         let keyName = AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)
         logger.info("Starting track of \(keyName)")
         statusCallback?("Starting track of \(keyName)")
+        
+        // check to see if the accessory is already tracked
         guard trackedAccessories[keyName] == nil else {
             logger.info("Accessory already tracked of \(keyName)")
             resultWrittenCallback?(keyName)
@@ -337,12 +368,13 @@ class AccessoryFinder {
         }
         
         let targetHome: HSKHome
-    
+        // check if we already allocated this home and get if from the cache
         statusCallback?("Looking for home: \(inHomeNamed)")
         if let storedHome = trackedHomes[inHomeNamed] {
             logger.info("Reusing home \(inHomeNamed)")
             targetHome = storedHome
         } else {
+            // get a new home from the manager
             guard let newHome = await getTargetHome(inHomeNamed) else {
                 logger.info("Get getTargetHome loop aborted")
                 return nil
@@ -352,13 +384,15 @@ class AccessoryFinder {
             
             targetHome = await HSKHome(home: newHome)
         }
-       
+        
+        // find the accessory in the home
         statusCallback?("Looking for accessory \(accessoryName) in room \(inRoomNamed)")
-        guard let targetAccessory = try await getTargetAccessorNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
+        guard let targetAccessory = try await getTargetAccessoryNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
             logger.info("Get getTargetAccessorNamed loop aborted")
             return nil
         }
         
+        // check if the accessory is already tracked
         if let tracked = trackedAccessories[keyName], tracked == targetAccessory {
             logger.info("Already tracking accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
             resultWrittenCallback?(keyName)
@@ -377,6 +411,7 @@ class AccessoryFinder {
         
         var accessoryServices = accessory.accessory.services
         
+        // add new characteristic changes to the data store
         trackedAccessories[keyName] = targetAccessory
         logger.info("Tracking accessory \(keyName.description)")
         statusCallback?("Tracking accessory \(keyName.description)")

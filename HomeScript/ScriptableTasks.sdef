@@ -39,13 +39,21 @@
                 <type type="number"/>
             </direct-parameter>
             <parameter name="to characteristic" type="text" code="cha3" description="The characteristic name."/>
-            <parameter name="service" type="text" code="srv3" description="The service name."/>
+            <parameter name="service" type="text" code="sr95" description="The service name."/>
             <parameter name="accessory" type="list of text" code="acc3" description="The accessory name."/>
          </command>
         <command name="tracked accessories" code="HSPTtrak" description="Reads the tracked accessories">
             <cocoa class="HomeScript.AccessoryTrackedAccessoriesScripter"/>
             <result  description="The list of tracked accessories.">
                         <type type="text" list="yes"/>
+            </result>
+        </command>
+        <command name="tracked characteristics and values for" code="HSPTgtcv" description="Gets a characteristic Value">
+            <cocoa class="HomeScript.AccessoryTrackedCharacteristicsAndValuesForServiceScripter"/>
+            <parameter name="service" type="text" code="sr12" description="The service name."/>
+            <parameter name="accessory" type="list of text" code="ac43" description="The accessory name."/>\
+            <result  description="The list of tracked characteristics.">
+                        <type type="any"/>
             </result>
         </command>
         <command name="tracked characteristics for" code="HSPTgtca" description="Gets a characteristic Value">
