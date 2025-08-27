@@ -10,7 +10,7 @@
 import Foundation
 import os
 
-// This is copied from the internets...
+// This class is copied from the internets...
 class Scripting: NSObject {
     
     class func enableScripting() {
