@@ -389,6 +389,9 @@ class AccessoryGetterScripter: NSScriptCommand {
 // param toCharacteristic : String
 // param service : String
 // param accessory : Array[accessory, room, home]
+//
+// returns true if the write was successful
+// if the write was not successful the error log can be viewed for the failure reason
 @MainActor
 @objc
 class AccessorySetterScripter: NSScriptCommand {
@@ -402,10 +405,14 @@ class AccessorySetterScripter: NSScriptCommand {
             fatalError("Could not parse accessory name")
         }
         
-        _ = AccessoryFinder.shared.setTrackedAccessryCharacteristic(value: arguments[""],
-                                                                    characteristicName: arguments["toCharacteristic"] as! String,
-                                                                    serviceName: arguments["service"] as! String,
-                                                                    accessory: accessory)
+        Task {
+            let written = await AccessoryFinder.shared.setTrackedAccessryCharacteristic(value: arguments[""],
+                                                                        characteristicName: arguments["toCharacteristic"] as! String,
+                                                                        serviceName: arguments["service"] as! String,
+                                                                        accessory: accessory)
+            self.resumeExecution(withResult: NSNumber(value: written))
+        }
+        self.suspendExecution()
         return nil
     }
 }

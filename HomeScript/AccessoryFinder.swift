@@ -231,7 +231,7 @@ class AccessoryFinder {
     // set the value of a characteristic
     // a write failure will append an error to the write error array
     // if the write is successful the local datastore is updated
-    func setTrackedAccessryCharacteristic(value: Any?, characteristicName: String, serviceName: String, accessory keyName: AFAccessoryNameContainer) -> Bool {
+    func setTrackedAccessryCharacteristic(value: Any?, characteristicName: String, serviceName: String, accessory keyName: AFAccessoryNameContainer) async -> Bool {
 
         guard let accessory = trackedAccessories[keyName] else {
             return false
@@ -255,22 +255,23 @@ class AccessoryFinder {
             return false
         }
 
-        char.writeValue(value) { err in
-            if let err {
-                self.logger.error("Failed to write value \(String(describing:value)) to characteristic \(characteristicName) for accessory \(keyName.description): \(err.localizedDescription)")
-                let myError = NSError(domain: "AccessoryFinder", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to write value \(String(describing:value)) to characteristic \(characteristicName) for accessory \(keyName.description): \(err.localizedDescription)",
-                    NSUnderlyingErrorKey: err])
-                
-                self.writeErrors.append(myError)
-                return
-            }
-
-            // need to write the updated value into the data source
-            self.updateDataStore(key: keyName, serviceName: self.serviceToServiceName(service), characteristicName: characteristicName, value: value)
-
-            self.logger.info("SET characteristic \(characteristicName) value \(String(describing:value)) in service \(self.serviceToServiceName(service)) in accessory \(keyName.description)")
+        do {
+            try await char.writeValue(value)
+        } catch {
+            self.logger.error("Failed to write value \(String(describing:value)) to characteristic \(characteristicName) for accessory \(keyName.description): \(error.localizedDescription)")
+            let myError = NSError(domain: "AccessoryFinder", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to write value \(String(describing:value)) to characteristic \(characteristicName) for accessory \(keyName.description): \(error.localizedDescription)",
+                NSUnderlyingErrorKey: error])
+            
+            self.writeErrors.append(myError)
+            return false
         }
+ 
+        // need to write the updated value into the data source
+        self.updateDataStore(key: keyName, serviceName: self.serviceToServiceName(service), characteristicName: characteristicName, value: value)
+
+        self.logger.info("SET characteristic \(characteristicName) value \(String(describing:value)) in service \(self.serviceToServiceName(service)) in accessory \(keyName.description)")
+
         return true
     }
 

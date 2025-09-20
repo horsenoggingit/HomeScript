@@ -41,6 +41,9 @@
             <parameter name="to characteristic" type="text" code="cha3" description="The characteristic name."/>
             <parameter name="service" type="text" code="sr95" description="The service name."/>
             <parameter name="accessory" type="list of text" code="acc3" description="The accessory name."/>
+            <result  description="The list of tracked accessories.">
+                        <type type="number"/>
+            </result>
          </command>
         <command name="tracked accessories" code="HSPTtrak" description="Reads the tracked accessories">
             <cocoa class="HomeScript.AccessoryTrackedAccessoriesScripter"/>
