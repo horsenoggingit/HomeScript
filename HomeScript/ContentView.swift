@@ -8,10 +8,6 @@
 import SwiftUI
 
 class ListItem: Identifiable, ObservableObject {
-    //let id: String
-//    var id : String {
-//        name + "\(value ?? "")" + "\(date ?? Date())" + "\(children?.count ?? 0)"
-//    }
     @Published var name: String
     @Published var value: Any?
     @Published var date: Date?
@@ -23,9 +19,13 @@ class ListItem: Identifiable, ObservableObject {
 
 @MainActor
 class ViewModel: ObservableObject {
-    @Published var rootItem = ListItem(name: "Root")
-    var shadowRootItem = ListItem(name: "Root")
+    @Published var rootItem : ListItem
+    var shadowRootItem : ListItem
     init() {
+        let item = ListItem(name: "Root")
+        rootItem = item
+        shadowRootItem = item
+        
         rootItem.children = []
         shadowRootItem.children = []
         var cont : AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]>.Continuation?
@@ -113,11 +113,9 @@ struct ContentView: View {
                     }
                 }
 
-        .listStyle(.sidebar)
+//        .listStyle(.sidebar)
         .padding()
-        .task {
- 
-        }
+
  
    }
     
