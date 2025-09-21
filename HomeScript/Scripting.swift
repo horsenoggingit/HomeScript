@@ -223,6 +223,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
     static let logger = Logger()
     static var resumerStore = [String: (NSAppleEventDescriptor?) -> Void]()
     
+    // all the tasks needed when we want to close a client connection
     func finishClientConnection(_ client: String, clientHistory:  [[AFAccessoryNameContainer : [String : [String: Any?]]]]) {
         AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
         AccessoryTrackedGetterScripter.timerTaskStore[client]?.cancel()
@@ -232,6 +233,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         AccessoryTrackedGetterScripter.resumerStore[client] = nil
     }
     
+    // first time a client connects send the known state of all tracked accessories
     func allTrackedCharacteristicValuesAsEvents() -> [[AFAccessoryNameContainer : [String : [String: Any?]]]] {
         let trackedAccessories = AccessoryFinder.shared.readTrackedAccessories()
         
@@ -276,7 +278,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         let client = arguments["id"] as? String ?? UUID().uuidString
         let clientHistory = AccessoryTrackedGetterScripter.historyStore[client] ?? []
         
-        
+        // are we already connected with the same client? This shouldn't happen
         guard !AccessoryTrackedGetterScripter.isConnectedStore.contains(client) else {
             
             // messed up situation
@@ -284,6 +286,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return RecordUtilities.dictToRecord(["client" : client, "events" : clientHistory])
         }
         
+        // is this a new client? Add structures to cache messages when it is offline
         if arguments["id"] as? String == nil {
             var cont : AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]>.Continuation?
             let stream = AsyncStream<[AFAccessoryNameContainer : [String : [String: Any?]]]> { continuation in
@@ -321,6 +324,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : clientHistory])
         }
         
+        // client is connecting and waiting for messages
         AccessoryTrackedGetterScripter.isConnectedStore.insert(client)
         
         var timeout = 60.0
@@ -340,6 +344,8 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         AccessoryTrackedGetterScripter.resumerStore[client] = { [weak self]  result in
             self?.resumeExecution(withResult: result)
         }
+        
+        // inform we are still processing and wait for timeout or a new event
         suspendExecution()
         return nil
     }
