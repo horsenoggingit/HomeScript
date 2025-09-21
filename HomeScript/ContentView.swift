@@ -8,21 +8,44 @@
 import SwiftUI
 
 class ListItem: Identifiable, ObservableObject {
+    
     @Published var name: String
     @Published var value: Any?
     @Published var date: Date?
     @Published var children : [ListItem]?
+    static var dateStyple = {
+        var style = Date.ISO8601FormatStyle()
+        style.timeZone = .current
+        return style
+    }()
+    
     init(name: String) {
         self.name = name
     }
 }
 
+struct HistoryItem : Identifiable, Equatable {
+    static func == (lhs: HistoryItem, rhs: HistoryItem) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    var id: UUID = UUID()
+    let home : String
+    let room : String
+    let accessory : String
+    let service : String
+    let characteristic : String
+    let value : Any?
+    let date : Date?
+}
+
 @MainActor
 class ViewModel: ObservableObject {
     @Published var rootItem : ListItem
+    @Published var history : [HistoryItem] = []
     var shadowRootItem : ListItem
     init() {
-        let item = ListItem(name: "Root")
+        let item = ListItem(name: "Homes and Accessories")
         rootItem = item
         shadowRootItem = item
         
@@ -60,6 +83,15 @@ class ViewModel: ObservableObject {
                 var theList = shadowRootItem
                 var createNew = false
                 
+                let historyItem = HistoryItem(home: pathArray[0], room: pathArray[1], accessory: pathArray[2], service: pathArray[3], characteristic: pathArray[4], value: charValue, date: charDate)
+                
+                var shadowHist = history
+                shadowHist.append(historyItem)
+                if shadowHist.count > 100 {
+                    shadowHist.removeFirst()
+                }
+                history = shadowHist
+                
                 for indx in 0..<pathArray.count {
                     let name = pathArray[indx]
                     if !createNew, let item = theList.children?.first(where: { item in
@@ -93,29 +125,62 @@ class ViewModel: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var viewModel = ViewModel()
+    @State private var followLastHistory : Bool = false
 
-
+    @State var timeoutTask : Task<(), Never>?
+    
     private let hskHomeManager = AccessoryFinder.shared
     var body: some View {
-        List {
-            OutlineGroup(viewModel.rootItem, children: \.children) { item in
-                        HStack {
+        HStack {
+            List {
+                OutlineGroup(viewModel.rootItem, children: \.children) { item in
+                    VStack(alignment: .leading) {
+                        if let itemDate = item.date {
+                            Text("\(itemDate.ISO8601Format(ListItem.dateStyple))")
+                                .font(Font.caption.bold())
+                        }
+                        if let itemValue = item.value {
+                            Text(item.name + ": \(itemValue)")
+                        } else {
                             Text(item.name)
-                            VStack {
-                                if let itemValue = item.value {
-                                    Text(verbatim: "Value: \(itemValue)")
-                                }
-                                if let itemDate = item.date {
-                                    Text("Last Update: \(itemDate, style: .date)")
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .padding()
+            .frame(width: 400)
+            VStack(alignment: .trailing) {
+                Toggle(isOn: $followLastHistory) {
+                    Text("Follow New Events")
+                        
+                }
+                .frame(width: 300,alignment: .trailing)
+                .padding()
+                ScrollViewReader { reader in
+                    List(viewModel.history, id: \.id) { item in
+                        VStack(alignment: .leading) {
+                            Text(verbatim: "\(item.date?.ISO8601Format(ListItem.dateStyple) ?? "*No Time*")")
+                                .font(Font.caption.bold())
+                            Text(verbatim: "\(item.home)-\(item.room)-\(item.accessory)-\(item.service)-\(item.characteristic): \(item.value ?? "N/A")")
+                        }
+                    }
+                    .onChange(of: viewModel.history) { _, newValue in
+                        timeoutTask?.cancel()
+                        timeoutTask = Task {
+                            try? await Task.sleep(for:.microseconds(200))
+                            if Task.isCancelled || !self.followLastHistory { return }
+                            if let lastMessage = newValue.last {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    reader.scrollTo(lastMessage.id, anchor: .bottom)
                                 }
                             }
                         }
                     }
                 }
-
-//        .listStyle(.sidebar)
-        .padding()
-
+            }
+            .padding()
+        }
  
    }
     
