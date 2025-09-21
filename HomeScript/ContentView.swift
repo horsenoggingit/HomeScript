@@ -166,15 +166,20 @@ struct ContentView: View {
                             Text(verbatim: "\(item.home)-\(item.room)-\(item.accessory)-\(item.service)-\(item.characteristic): \(item.value ?? "N/A")")
                         }
                     }
-                    .onChange(of: viewModel.history) { _, newValue in
+                    .onChange(of: viewModel.history) { _, _ in
                         timeoutTask?.cancel()
                         timeoutTask = Task {
                             try? await Task.sleep(for:.milliseconds(200))
-                            guard !Task.isCancelled, self.followLastHistory else { return }
-                            if let lastMessage = newValue.last {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    reader.scrollTo(lastMessage.id, anchor: .bottom)
-                                }
+                            guard !Task.isCancelled, self.followLastHistory, let lastMessage = viewModel.history.last else { return }
+                            withAnimation(.easeInOut(duration: 0.1)) {
+                                reader.scrollTo(lastMessage.id, anchor: .bottom)
+                            }
+                        }
+                    }
+                    .onChange(of: followLastHistory) { _, newValue in
+                        if newValue, let lastMessage = viewModel.history.last {
+                            withAnimation(.easeInOut(duration: 0.1)) {
+                                reader.scrollTo(lastMessage.id, anchor: .bottom)
                             }
                         }
                     }
