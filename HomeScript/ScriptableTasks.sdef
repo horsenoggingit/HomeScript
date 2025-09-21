@@ -17,6 +17,7 @@
         <command name="stream" code="HSPTstrm" description="Streams all tracked accessory changes">
             <cocoa class="HomeScript.AccessoryTrackedGetterScripter"/>
             <parameter name="id" type="text" code="idcl" optional="yes" description="The accessory name."/>
+            <parameter name="state" type="number" code="stcl" optional="yes" description="Return all accessory state."/>
             <parameter name="timeout" type="number" code="tmo1" optional="yes" description="The discovery timeout."/>
             <result  description="The record of events that have occured.">
                         <type type="any"/>

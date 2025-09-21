@@ -8,16 +8,17 @@
 import SwiftUI
 
 class ListItem: Identifiable, ObservableObject {
+    static var dateStyle = {
+        var style = Date.ISO8601FormatStyle()
+        style.timeZone = .current
+        return style
+    }()
     
     @Published var name: String
     @Published var value: Any?
     @Published var date: Date?
     @Published var children : [ListItem]?
-    static var dateStyple = {
-        var style = Date.ISO8601FormatStyle()
-        style.timeZone = .current
-        return style
-    }()
+
     
     init(name: String) {
         self.name = name
@@ -40,7 +41,7 @@ struct HistoryItem : Identifiable, Equatable {
 }
 
 @MainActor
-class ViewModel: ObservableObject {
+class AccessoryFinderViewModel: ObservableObject {
     @Published var rootItem : ListItem
     @Published var history : [HistoryItem] = []
     var shadowRootItem : ListItem
@@ -124,7 +125,7 @@ class ViewModel: ObservableObject {
 }
 
 struct ContentView: View {
-    @StateObject private var viewModel = ViewModel()
+    @StateObject private var viewModel = AccessoryFinderViewModel()
     @State private var followLastHistory : Bool = false
 
     @State var timeoutTask : Task<(), Never>?
@@ -136,7 +137,7 @@ struct ContentView: View {
                 OutlineGroup(viewModel.rootItem, children: \.children) { item in
                     VStack(alignment: .leading) {
                         if let itemDate = item.date {
-                            Text("\(itemDate.ISO8601Format(ListItem.dateStyple))")
+                            Text("\(itemDate.ISO8601Format(ListItem.dateStyle))")
                                 .font(Font.caption.bold())
                         }
                         if let itemValue = item.value {
@@ -160,7 +161,7 @@ struct ContentView: View {
                 ScrollViewReader { reader in
                     List(viewModel.history, id: \.id) { item in
                         VStack(alignment: .leading) {
-                            Text(verbatim: "\(item.date?.ISO8601Format(ListItem.dateStyple) ?? "*No Time*")")
+                            Text(verbatim: "\(item.date?.ISO8601Format(ListItem.dateStyle) ?? "*No Time*")")
                                 .font(Font.caption.bold())
                             Text(verbatim: "\(item.home)-\(item.room)-\(item.accessory)-\(item.service)-\(item.characteristic): \(item.value ?? "N/A")")
                         }
@@ -168,8 +169,8 @@ struct ContentView: View {
                     .onChange(of: viewModel.history) { _, newValue in
                         timeoutTask?.cancel()
                         timeoutTask = Task {
-                            try? await Task.sleep(for:.microseconds(200))
-                            if Task.isCancelled || !self.followLastHistory { return }
+                            try? await Task.sleep(for:.milliseconds(200))
+                            guard !Task.isCancelled, self.followLastHistory else { return }
                             if let lastMessage = newValue.last {
                                 withAnimation(.easeInOut(duration: 0.15)) {
                                     reader.scrollTo(lastMessage.id, anchor: .bottom)
