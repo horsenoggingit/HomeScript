@@ -64,8 +64,13 @@ actor HSKAccessory {
         }
         
         for service in accessory.services {
+            if Task.isCancelled {
+                break
+            }
             for characteristic in service.characteristics {
-                
+                if Task.isCancelled {
+                    break
+                }
                 if characteristic.properties.contains(HMCharacteristicPropertySupportsEventNotification) {
                     try? await characteristic.enableNotification(true)
                 }

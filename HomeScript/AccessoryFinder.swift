@@ -12,7 +12,16 @@ import os
 // these are what the user would know
 // the is the minimum object to track
 // the system will automatically track all Services and Characteristics
-struct AFAccessoryNameContainer : Hashable, CustomStringConvertible {
+struct AFAccessoryNameContainer : Hashable, CustomStringConvertible, Comparable {
+    static func < (lhs: AFAccessoryNameContainer, rhs: AFAccessoryNameContainer) -> Bool {
+        if lhs.home != rhs.home {
+            return lhs.home < rhs.home
+        }
+        if lhs.room != rhs.room {
+            return lhs.room < rhs.room
+        }
+        return lhs.name < rhs.name
+    }
     
     init(name: String, home: String, room: String) {
         self.name = name
@@ -58,11 +67,17 @@ class AccessoryFinder {
     
     // fast aaccess to the tracked accessories
     private var trackedAccessories = [AFAccessoryNameContainer : HMAccessory]()
+    
     // Keep track of the relationships between objects
     // Key(Home:Room:Accessory) : [Service : [ Characteristic : Last read value] ] ]
     private var dataStore = [AFAccessoryNameContainer : [String : [String: Any?]]]()
     
     private var dataStoreContinuations = [AsyncStream<[AFAccessoryNameContainer : [String : [String : Any? ]]]>.Continuation]()
+    
+    // the process of tracking an accessory take time, this dict helps to avoid
+    // running into issues when when multiple trakcing requests are made while tracking
+    // is in progress
+    private var accessoriesTrackingInProgress : [AFAccessoryNameContainer: [(resultWrittenCallback: ((AFAccessoryNameContainer?) -> Void)?, continuation: CheckedContinuation<AFAccessoryNameContainer?, Error>)]] = [:]
     
     func addDataStoreContinuation(_ continuation: AsyncStream<[AFAccessoryNameContainer : [String : [String : Any? ]]]>.Continuation) {
         self.dataStoreContinuations.append(continuation)
@@ -354,6 +369,7 @@ class AccessoryFinder {
     // since this is a multi-phase function statusCallback will be called with progress updates
     // the caller is responsible for managing timeout
     // this function will return nil if the continuation or enclosing task is cancelled
+
     func trackAccessoryNamed(_ accessoryName: String, inRoomNamed: String, inHomeNamed: String, resultWrittenCallback: ((AFAccessoryNameContainer?) -> Void)? = nil, statusCallback: ((String) -> Void)? = nil) async throws -> AFAccessoryNameContainer? {
         var resultWritten = false
         let keyName = AFAccessoryNameContainer(name: accessoryName, home: inHomeNamed, room: inRoomNamed)
@@ -362,11 +378,29 @@ class AccessoryFinder {
         
         // check to see if the accessory is already tracked
         guard trackedAccessories[keyName] == nil else {
-            logger.info("Accessory already tracked of \(keyName)")
+            logger.info("Accessory already tracked \(keyName)")
             resultWrittenCallback?(keyName)
             statusCallback?("Tracking already started for \(keyName)")
             return keyName
         }
+        
+        // check if we are currently trying to track this accessory
+        if let trackArray = accessoriesTrackingInProgress[keyName] {
+            logger.info("Accessory in progress of being tracked \(keyName)")
+            statusCallback?("Accessory in progress of being tracked \(keyName)")
+            var result : AFAccessoryNameContainer? = nil
+            do {
+                result = try await withCheckedThrowingContinuation { continuation in
+                    var tkArray = trackArray
+                    tkArray.append((resultWrittenCallback, continuation))
+                    accessoriesTrackingInProgress[keyName] = tkArray
+                }
+            } catch {
+                throw error
+            }
+            return result
+        }
+        accessoriesTrackingInProgress[keyName] = []
         
         let targetHome: HSKHome
         // check if we already allocated this home and get if from the cache
@@ -390,13 +424,23 @@ class AccessoryFinder {
         statusCallback?("Looking for accessory \(accessoryName) in room \(inRoomNamed)")
         guard let targetAccessory = try await getTargetAccessoryNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
             logger.info("Get getTargetAccessorNamed loop aborted")
-            return nil
+            // task was cancelled
+            accessoriesTrackingInProgress[keyName]?.forEach { arg in
+                arg.1.resume(throwing: NSError(domain: "AccessoryFinder", code: 0, userInfo: [NSLocalizedDescriptionKey: "Get getTargetAccessorNamed loop aborted"]))
+            }
+            accessoriesTrackingInProgress.removeValue(forKey: keyName)
+            throw NSError(domain: "AccessoryFinder", code: 0, userInfo: [NSLocalizedDescriptionKey: "Get getTargetAccessorNamed loop aborted"])
         }
         
         // check if the accessory is already tracked
         if let tracked = trackedAccessories[keyName], tracked == targetAccessory {
             logger.info("Already tracking accessory \(accessoryName) in room \(inRoomNamed) in home \(inHomeNamed)")
             resultWrittenCallback?(keyName)
+            accessoriesTrackingInProgress[keyName]?.forEach { arg in
+                arg.0?(keyName)
+                arg.1.resume(returning: keyName)
+            }
+            accessoriesTrackingInProgress.removeValue(forKey: keyName)
             return keyName
         }
         
@@ -413,9 +457,6 @@ class AccessoryFinder {
         var accessoryServices = accessory.accessory.services
         
         // add new characteristic changes to the data store
-        trackedAccessories[keyName] = targetAccessory
-        logger.info("Tracking accessory \(keyName.description)")
-        statusCallback?("Tracking accessory \(keyName.description)")
         for await event in accessoryStream {
             switch event {
             case .characteristicValueUpdated(let service, let characteristic, let value):
@@ -432,10 +473,25 @@ class AccessoryFinder {
                 // call the calback to inform that all the expected values have been writted
                 if accessoryServices.isEmpty, !resultWritten, let resultWrittenCallback {
                     resultWrittenCallback(keyName)
+                    accessoriesTrackingInProgress[keyName]?.forEach { arg in
+                        arg.0?(keyName)
+                        arg.1.resume(returning: keyName)
+                    }
+                    accessoriesTrackingInProgress.removeValue(forKey: keyName)
+                    trackedAccessories[keyName] = targetAccessory
+                    logger.info("Tracking accessory \(keyName.description)")
+                    statusCallback?("Tracking accessory \(keyName.description)")
+
                     resultWritten = true
                 }
             }
         }
+        accessoriesTrackingInProgress[keyName]?.forEach { arg in
+            arg.0?(keyName)
+            arg.1.resume(returning: nil)
+        }
+        accessoriesTrackingInProgress.removeValue(forKey: keyName)
+
         logger.info("Accessory tracking complete for \(keyName.description)")
         statusCallback?("Accessory tracking complete for \(keyName.description)")
         // tracking is complete. The datasotre will no longer update

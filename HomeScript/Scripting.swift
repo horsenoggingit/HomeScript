@@ -315,6 +315,12 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : allTrackedCharacteristicValuesAsEvents()])
         }
         
+        // if we have accumuated values offline Send them immediately
+        if !clientHistory.isEmpty {
+            AccessoryTrackedGetterScripter.historyStore[client] = []
+            return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : clientHistory])
+        }
+        
         AccessoryTrackedGetterScripter.isConnectedStore.insert(client)
         
         var timeout = 60.0
