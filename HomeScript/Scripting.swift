@@ -223,7 +223,26 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
     static var timerTaskStore = [String: Task<Void, Never>]()
     static let logger = Logger()
     static var resumerStore = [String: (NSAppleEventDescriptor?) -> Void]()
+    static var updateContinuationStore = [AsyncStream<Void>.Continuation]()
+    static func addUpdateContinuation(_ continuation: AsyncStream<Void>.Continuation) {
+        AccessoryTrackedGetterScripter.updateContinuationStore.append(continuation)
+    }
     
+    static func updated() {
+        var indexes = [Int]()
+        for (index, cont) in AccessoryTrackedGetterScripter.updateContinuationStore.enumerated() {
+            switch cont.yield() {
+            case .terminated:
+                indexes.insert(index, at: 0)
+            default:
+                break
+            }
+        }
+        
+        for index in indexes.reversed() {
+            AccessoryTrackedGetterScripter.updateContinuationStore.remove(at: index)
+       }
+    }
     // all the tasks needed when we want to close a client connection
     func finishClientConnection(_ client: String, clientHistory:  [[AFAccessoryNameContainer : [String : [String: Any?]]]]) {
         AccessoryTrackedGetterScripter.isConnectedStore.remove(client)
@@ -232,6 +251,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
         AccessoryTrackedGetterScripter.historyStore[client] = []
         AccessoryTrackedGetterScripter.resumerStore[client]?(RecordUtilities.dictToRecord(["client" : client, "eventHistory" : clientHistory]))
         AccessoryTrackedGetterScripter.resumerStore[client] = nil
+        AccessoryTrackedGetterScripter.updated()
     }
     
     // first time a client connects send the known state of all tracked accessories
@@ -324,7 +344,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
                 }
                 AccessoryTrackedGetterScripter.logger.info("Stopped streaming for client \(client)")
             }
-            
+            AccessoryTrackedGetterScripter.updated()
             // if we created a new key or a new key was passed in we respond with the state of
             // characteristics.
             return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : allTrackedCharacteristicValuesAsEvents()])
@@ -361,6 +381,7 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             self?.resumeExecution(withResult: result)
         }
         
+        AccessoryTrackedGetterScripter.updated()
         // inform we are still processing and wait for timeout or a new event
         suspendExecution()
         return nil
