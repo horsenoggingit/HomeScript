@@ -339,6 +339,9 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
                     if AccessoryTrackedGetterScripter.isConnectedStore.contains(client) {
                         finishClientConnection(client, clientHistory: clientHistory)
                     } else {
+                        // TODO: probably a good place to determine if a client is inactive.
+                        // perhaps if a client hasn't connected in more than 10 minutes
+                        // we should remove it from the task and history list
                         AccessoryTrackedGetterScripter.historyStore[client] = clientHistory
                     }
                 }
