@@ -9,6 +9,9 @@ import Foundation
 import HomeKit
 
 enum HSKAccessoryEventEnum {
+    case processingService(HMService)
+    case initialCharacteristicRead(HMService, HMCharacteristic)
+    case initialCharacteristicReadError(HMService, HMCharacteristic, Error)
     case characteristicValueUpdated(HMService, HMCharacteristic, Any?)
 }
 
@@ -63,13 +66,11 @@ actor HSKAccessory {
             }
         }
         
-        for service in accessory.services {
-            if Task.isCancelled {
-                break
-            }
+        outerLoop: for service in accessory.services {
+            self.eventContinuation.yield(.processingService(service))
             for characteristic in service.characteristics {
                 if Task.isCancelled {
-                    break
+                    break outerLoop
                 }
                 if characteristic.properties.contains(HMCharacteristicPropertySupportsEventNotification) {
                     try? await characteristic.enableNotification(true)
@@ -77,9 +78,10 @@ actor HSKAccessory {
                
                 if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
                     do {
+                        self.eventContinuation.yield(.initialCharacteristicRead(service, characteristic))
                         try await characteristic.readValue()
                     } catch {
-                        print ("Error reading characteristic \(characteristic.localizedDescription) value: \(error)")
+                        self.eventContinuation.yield(.initialCharacteristicReadError(service, characteristic, error))
                     }
                 }
                 self.updatedValueForCharacteristic(characteristic, service: service)

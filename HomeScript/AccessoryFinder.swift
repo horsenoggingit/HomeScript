@@ -378,9 +378,9 @@ class AccessoryFinder {
         
         // check to see if the accessory is already tracked
         guard trackedAccessories[keyName] == nil else {
-            logger.info("Accessory already tracked \(keyName)")
-            resultWrittenCallback?(keyName)
+            logger.info("Tracking already started for  \(keyName)")
             statusCallback?("Tracking already started for \(keyName)")
+            resultWrittenCallback?(keyName)
             return keyName
         }
         
@@ -404,6 +404,7 @@ class AccessoryFinder {
         
         let targetHome: HSKHome
         // check if we already allocated this home and get if from the cache
+        logger.info("Looking for home: \(inHomeNamed)")
         statusCallback?("Looking for home: \(inHomeNamed)")
         if let storedHome = trackedHomes[inHomeNamed] {
             logger.info("Reusing home \(inHomeNamed)")
@@ -416,11 +417,11 @@ class AccessoryFinder {
             }
             
             logger.info("Tracking new home \(inHomeNamed)")
-            
             targetHome = await HSKHome(home: newHome)
         }
         
         // find the accessory in the home
+        logger.info("Looking for accessory \(accessoryName) in room \(inRoomNamed)")
         statusCallback?("Looking for accessory \(accessoryName) in room \(inRoomNamed)")
         guard let targetAccessory = try await getTargetAccessoryNamed(accessoryName, inRoomNamed: inRoomNamed, inHome: targetHome) else {
             logger.info("Get getTargetAccessorNamed loop aborted")
@@ -452,40 +453,55 @@ class AccessoryFinder {
             fatalError("contuation nil")
         }
         
-        let accessory = await HSKAccessory(accessory: targetAccessory, eventContinuation: accessoryContuation)
-        
-        var accessoryServices = accessory.accessory.services
-        
-        // add new characteristic changes to the data store
-        for await event in accessoryStream {
-            switch event {
-            case .characteristicValueUpdated(let service, let characteristic, let value):
-                
-                let serviceName = self.serviceToServiceName(service)
-                
-                logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) in service \(serviceName) of accessory \(keyName.description)")
-                
-                self.updateDataStore(key: keyName, serviceName: serviceName, characteristicName: characteristic.localizedDescription, value: value)
-                
-                accessoryServices.removeAll { ss in
-                    ss == service
-                }
-                // call the calback to inform that all the expected values have been writted
-                if accessoryServices.isEmpty, !resultWritten, let resultWrittenCallback {
-                    resultWrittenCallback(keyName)
-                    accessoriesTrackingInProgress[keyName]?.forEach { arg in
-                        arg.0?(keyName)
-                        arg.1.resume(returning: keyName)
+        let responseTask = Task {
+            var accessoryServices = targetAccessory.services
+     
+            // add new characteristic changes to the data store
+            for await event in accessoryStream {
+                switch event {
+                case .characteristicValueUpdated(let service, let characteristic, let value):
+                    
+                    let serviceName = self.serviceToServiceName(service)
+                    
+                    logger.info("Received characteristic \(characteristic.localizedDescription) value \(String(describing:value)) in service \(serviceName) of accessory \(keyName.description)")
+                    
+                    self.updateDataStore(key: keyName, serviceName: serviceName, characteristicName: characteristic.localizedDescription, value: value)
+                    
+                    accessoryServices.removeAll { ss in
+                        ss == service
                     }
-                    accessoriesTrackingInProgress.removeValue(forKey: keyName)
-                    trackedAccessories[keyName] = targetAccessory
-                    logger.info("Tracking accessory \(keyName.description)")
-                    statusCallback?("Tracking accessory \(keyName.description)")
+                    // call the calback to inform that all the expected values have been writted
+                    if accessoryServices.isEmpty, !resultWritten, let resultWrittenCallback {
+                        resultWrittenCallback(keyName)
+                        accessoriesTrackingInProgress[keyName]?.forEach { arg in
+                            arg.0?(keyName)
+                            arg.1.resume(returning: keyName)
+                        }
+                        accessoriesTrackingInProgress.removeValue(forKey: keyName)
+                        trackedAccessories[keyName] = targetAccessory
+                        logger.info("Tracking accessory \(keyName.description)")
+                        statusCallback?("Tracking accessory \(keyName.description)")
 
-                    resultWritten = true
+                        resultWritten = true
+                    }
+                case .initialCharacteristicRead(let service, let characteristic):
+                    logger.info("Inital read for characteristic \(characteristic.localizedDescription) in service \(self.serviceToServiceName(service)) of accessory \(keyName.description)")
+     
+                case .initialCharacteristicReadError(let service, let characteristic, let error):
+                    logger.info("Error reading characteristic \(characteristic.localizedDescription) in service \(self.serviceToServiceName(service)) of accessory \(keyName.description): \(error.localizedDescription)")
+                case .processingService(let service):
+                    logger.info("Processing service \(self.serviceToServiceName(service)) of accessory \(keyName.description)")
                 }
             }
+            logger.info("Processing accessory service loop ended \(keyName.description)")
+            return ()
         }
+        
+        let accessory = await HSKAccessory(accessory: targetAccessory, eventContinuation: accessoryContuation)
+
+        _ = await responseTask.result
+        
+        _ = accessory
         accessoriesTrackingInProgress[keyName]?.forEach { arg in
             arg.0?(keyName)
             arg.1.resume(returning: nil)
@@ -497,6 +513,7 @@ class AccessoryFinder {
         // tracking is complete. The datasotre will no longer update
         self.trackedAccessories.removeValue(forKey: keyName)
         // retunring nill becasue the accessory is no longer tracked
+        
         return nil
     }
     

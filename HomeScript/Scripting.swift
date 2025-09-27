@@ -153,7 +153,7 @@ class AccessoryFinderScripter: NSScriptCommand {
         var task : Task<Void, Never>?
         task = Task { [weak self] in
             var trackingStatus : String = "Not Started"
-            var timeout = 60.0
+            var timeout = 110.0
             
             if let argTimeout = arguments["timeout"], let timeoutNumber = argTimeout as? NSNumber {
                 timeout = Double(timeoutNumber.doubleValue)
