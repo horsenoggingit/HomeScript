@@ -253,7 +253,8 @@ class AccessoryFinder {
         }
         
         let service = accessory.services.first { service in
-            self.serviceToServiceName(service) == serviceName
+            // many accessories only have one service per type. This isn't aloways true but it makes things easier
+            self.serviceToServiceName(service).hasPrefix(serviceName)
         }
         
         guard let service else {

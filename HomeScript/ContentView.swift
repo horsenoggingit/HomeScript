@@ -6,6 +6,77 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
+
+
+extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
+}
+
+struct ListItemView : View {
+    @State var item: ListItem
+    @State var opacity: Double = 1.0
+    
+    func copyAnimation() {
+        opacity = 0.0
+        Task {
+            withAnimation(.linear(duration: 0.8)) {
+                opacity = 1.0
+            }
+        }
+
+    }
+    
+    var body: some View {
+        ZStack {
+            VStack(alignment: .leading) {
+                
+                if let itemDate = item.date {
+                    Text("\(itemDate.ISO8601Format(ListItem.dateStyle))")
+                        .font(Font.caption.bold())
+                }
+                if let itemValue = item.value {
+                    Text(item.name + ": \(itemValue)")
+                } else {
+                    Text(item.name)
+                }
+                if let secondayName = item.secondaryName {
+                    Text(secondayName)
+                        .font(Font.caption.bold())
+                }
+            }
+            ZStack {
+                 // Fills the entire screen with red
+                Text("Copied")
+                .bold()
+                .foregroundStyle(Color.black)
+                .background {
+                    Color.yellow.padding(-5)
+                }
+            }
+            .opacity(1.0 - opacity)
+ 
+        }
+        .contentShape(Rectangle())
+        .`if`(item.itemInfo != nil) { view in
+            view.onTapGesture {
+                guard let itemInfo = item.itemInfo else { return }
+                let nameId = "\(itemInfo.home)-\(itemInfo.room)-\(itemInfo.accessory)-\(item.associatedServiceName ?? itemInfo.service)-\(itemInfo.characteristic)"
+                let nameIdNoSpace = nameId.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "")
+                UIPasteboard.general.string = "global chr\(nameIdNoSpace)\nset chr\(nameIdNoSpace) to \"\(nameId)\"\naddTrackedCharacteristic(my makeTrackedCharacteristic(chr\(nameIdNoSpace), \"\(itemInfo.home)\", \"\(itemInfo.room)\", \"\(itemInfo.accessory)\", \"\(itemInfo.service)\", \"\(itemInfo.characteristic)\", -1))"
+                copyAnimation()
+            }
+        }
+    }
+    
+}
 
 struct ContentView: View {
     @StateObject private var viewModel = AccessoryFinderViewModel()
@@ -15,28 +86,26 @@ struct ContentView: View {
     @State var timeoutTask : Task<(), Never>?
     
     private let hskHomeManager = AccessoryFinder.shared
+
     var body: some View {
         HStack {
             VStack(alignment: .leading) {
-                Text("Current State")
+                HStack{
+                    Text("Current State")
+                    Spacer(minLength:20)
+                    Text("Search:")
+                    TextField("Search Term", text: $viewModel.searchTerm)
+                }
+                
+                
                 List {
-                    OutlineGroup(viewModel.rootItem, children: \.children) { item in
-                        VStack(alignment: .leading) {
-                            if let itemDate = item.date {
-                                Text("\(itemDate.ISO8601Format(ListItem.dateStyle))")
-                                    .font(Font.caption.bold())
-                            }
-                            if let itemValue = item.value {
-                                Text(item.name + ": \(itemValue)")
-                            } else {
-                                Text(item.name)
-                            }
-                        }
+                    OutlineGroup(viewModel.rootItem, children: \.filteredChildren) { item in
+                        ListItemView(item: item)
                     }
                 }
                 .listStyle(.sidebar)
-                .frame(width: 400)
             }
+            .frame(width: 400)
             TabView {
                 Tab("Events", image: "") {
                     VStack(alignment: .trailing) {
