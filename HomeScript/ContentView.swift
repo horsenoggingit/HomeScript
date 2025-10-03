@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import UniformTypeIdentifiers
-
 
 extension View {
     @ViewBuilder
@@ -23,6 +21,7 @@ extension View {
 struct ListItemView : View {
     @State var item: ListItem
     @State var opacity: Double = 1.0
+    @State var aFrame : CGRect = .zero
     
     func copyAnimation() {
         opacity = 0.0
@@ -31,19 +30,19 @@ struct ListItemView : View {
                 opacity = 1.0
             }
         }
-
     }
     
     var body: some View {
-        ZStack {
+        ZStack(alignment: .leading)  {
+            
             VStack(alignment: .leading) {
-                
                 if let itemDate = item.date {
                     Text("\(itemDate.ISO8601Format(ListItem.dateStyle))")
                         .font(Font.caption.bold())
                 }
                 if let itemValue = item.value {
                     Text(item.name + ": \(itemValue)")
+                    
                 } else {
                     Text(item.name)
                 }
@@ -51,30 +50,61 @@ struct ListItemView : View {
                     Text(secondayName)
                         .font(Font.caption.bold())
                 }
+                
             }
-            ZStack {
-                 // Fills the entire screen with red
-                Text("Copied")
-                .bold()
-                .foregroundStyle(Color.black)
-                .background {
-                    Color.yellow.padding(-5)
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .local)
+            } action: { newValue in
+                aFrame = newValue
+            }
+            
+            .opacity(opacity)
+            
+            if (opacity != 1.0) {
+                ZStack {
+                    // Fills the entire screen with red
+                    Text("Copied")
+                        .bold()
+                        .foregroundStyle(Color.black)
+                        .frame(width: aFrame.width, height: aFrame.height)
+                        .padding(5)
                 }
+                .background {
+                    Color.yellow
+                }
+                .cornerRadius(6)
+                .opacity(1.0 - opacity)
+                .frame(width: aFrame.width, height: aFrame.height)
+                .position(x: aFrame.midX, y: aFrame.midY)
             }
-            .opacity(1.0 - opacity)
- 
         }
-        .contentShape(Rectangle())
-        .`if`(item.itemInfo != nil) { view in
-            view.onTapGesture {
-                guard let itemInfo = item.itemInfo else { return }
+        
+        .onTapGesture {
+            func itemASDexcription(_ item: ListItem) -> String {
+                guard let itemInfo = item.itemInfo else { return "" }
                 let nameId = "\(itemInfo.home)-\(itemInfo.room)-\(itemInfo.accessory)-\(item.associatedServiceName ?? itemInfo.service)-\(itemInfo.characteristic)"
                 let nameIdNoSpace = nameId.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "")
-                UIPasteboard.general.string = "global chr\(nameIdNoSpace)\nset chr\(nameIdNoSpace) to \"\(nameId)\"\naddTrackedCharacteristic(my makeTrackedCharacteristic(chr\(nameIdNoSpace), \"\(itemInfo.home)\", \"\(itemInfo.room)\", \"\(itemInfo.accessory)\", \"\(itemInfo.service)\", \"\(itemInfo.characteristic)\", -1))"
-                copyAnimation()
+                
+                return "global chr\(nameIdNoSpace)\nset chr\(nameIdNoSpace) to \"\(nameId)\"\naddTrackedCharacteristic(my makeTrackedCharacteristic(chr\(nameIdNoSpace), \"\(itemInfo.home)\", \"\(itemInfo.room)\", \"\(itemInfo.accessory)\", \"\(itemInfo.service)\", \"\(itemInfo.characteristic)\", -1))"
             }
+            var aSDescArray = [String]()
+            func recurseASDescription(_ item: ListItem) {
+                guard item.itemInfo != nil else {
+                    if let nextItems = item.filteredChildren {
+                        nextItems.forEach { nextItem in
+                            recurseASDescription(nextItem)
+                        }
+                    }
+                    return
+                }
+                aSDescArray.append(itemASDexcription(item))
+            }
+            recurseASDescription(item)
+            UIPasteboard.general.string = aSDescArray.joined(separator: "\n")
+            copyAnimation()
         }
     }
+    
     
 }
 
@@ -82,11 +112,11 @@ struct ContentView: View {
     @StateObject private var viewModel = AccessoryFinderViewModel()
     @StateObject private var scriptingViewModel = ScriptingViewModel()
     @State private var followLastHistory : Bool = false
-
+    
     @State var timeoutTask : Task<(), Never>?
     
     private let hskHomeManager = AccessoryFinder.shared
-
+    
     var body: some View {
         HStack {
             VStack(alignment: .leading) {
@@ -153,8 +183,8 @@ struct ContentView: View {
             }
         }
         .padding(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
- 
-   }
+        
+    }
     
 }
 
