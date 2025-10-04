@@ -140,6 +140,8 @@ struct ContentView: View {
                 Tab("Events", image: "") {
                     VStack(alignment: .trailing) {
                         HStack {
+                            Text("Search:")
+                            TextField("Search Term", text: $viewModel.historySearchTerm)
                             Spacer()
                             Toggle(isOn: $followLastHistory) {
                                 Text("Follow New Events")
@@ -147,25 +149,29 @@ struct ContentView: View {
                             .fixedSize()
                         }
                         ScrollViewReader { reader in
-                            List(viewModel.history, id: \.id) { item in
+                            List(viewModel.filteredHistory, id: \.id) { item in
                                 VStack(alignment: .leading) {
                                     Text(verbatim: "\(item.date?.ISO8601Format(ListItem.dateStyle) ?? "*No Time*")")
                                         .font(Font.caption.bold())
-                                    Text(verbatim: "\(item.home)-\(item.room)-\(item.accessory)-\(item.service)-\(item.characteristic): \(item.value ?? "N/A")")
+                                    if let serviceName = item.serviceName {
+                                        Text(verbatim: "\(item.home)-\(item.room)-\(item.accessory)-\(item.service)(\(serviceName))-\(item.characteristic): \(item.value ?? "N/A")")
+                                    } else {
+                                        Text(verbatim: "\(item.home)-\(item.room)-\(item.accessory)-\(item.service)-\(item.characteristic): \(item.value ?? "N/A")")
+                                    }
                                 }
                             }
-                            .onChange(of: viewModel.history) { _, _ in
+                            .onChange(of: viewModel.filteredHistory) { _, _ in
                                 timeoutTask?.cancel()
                                 timeoutTask = Task {
                                     try? await Task.sleep(for:.milliseconds(200))
-                                    guard !Task.isCancelled, self.followLastHistory, let lastMessage = viewModel.history.last else { return }
+                                    guard !Task.isCancelled, self.followLastHistory, let lastMessage = viewModel.filteredHistory.last else { return }
                                     withAnimation(.easeInOut(duration: 0.1)) {
                                         reader.scrollTo(lastMessage.id, anchor: .bottom)
                                     }
                                 }
                             }
                             .onChange(of: followLastHistory) { _, _ in
-                                if let lastMessage = viewModel.history.last {
+                                if let lastMessage = viewModel.filteredHistory.last {
                                     withAnimation(.easeInOut(duration: 0.1)) {
                                         reader.scrollTo(lastMessage.id, anchor: .bottom)
                                     }

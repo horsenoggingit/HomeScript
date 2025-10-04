@@ -353,15 +353,18 @@ class AccessoryTrackedGetterScripter: NSScriptCommand {
             return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : allTrackedCharacteristicValuesAsEvents()])
         }
         
+        if let allState = arguments["state"] as? NSNumber, allState.boolValue {
+            AccessoryTrackedGetterScripter.historyStore[client] = []
+            return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : allTrackedCharacteristicValuesAsEvents()])
+        }
+        
         // if we have accumuated values offline Send them immediately
         if !clientHistory.isEmpty {
             AccessoryTrackedGetterScripter.historyStore[client] = []
             return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : clientHistory])
         }
         
-        if let allState = arguments["state"] as? NSNumber, allState.boolValue {
-            return RecordUtilities.dictToRecord(["client" : client, "eventHistory" : allTrackedCharacteristicValuesAsEvents()])
-        }
+
         
         // client is connecting and waiting for messages
         AccessoryTrackedGetterScripter.isConnectedStore.insert(client)

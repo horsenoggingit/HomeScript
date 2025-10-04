@@ -36,6 +36,7 @@ struct HistoryItem : Identifiable, Equatable {
     let room : String
     let accessory : String
     let service : String
+    let serviceName : String?
     let characteristic : String
     let value : Any?
     let date : Date?
@@ -45,9 +46,15 @@ struct HistoryItem : Identifiable, Equatable {
 class AccessoryFinderViewModel: ObservableObject {
     @Published var rootItem : ListItem
     @Published var history : [HistoryItem] = []
+    @Published var filteredHistory : [HistoryItem] = []
     @Published var searchTerm : String = "" {
         didSet {
             filterAndAssign()
+        }
+    }
+    @Published var historySearchTerm : String = "" {
+        didSet {
+            filterHistoryAndAssign()
         }
     }
     
@@ -91,7 +98,7 @@ class AccessoryFinderViewModel: ObservableObject {
                 var theList = shadowRootItem
                 var createNew = false
                 
-                let historyItem = HistoryItem(home: pathArray[0], room: pathArray[1], accessory: pathArray[2], service: pathArray[3], characteristic: pathArray[4], value: charValue, date: charDate)
+                let historyItem = HistoryItem(home: pathArray[0], room: pathArray[1], accessory: pathArray[2], service: pathArray[3], serviceName: AccessoryFinder.shared.readStoredCharacteristicNamed(name: "Name", serviceName: pathArray[3], accessory: AFAccessoryNameContainer(name: pathArray[2], home: pathArray[0], room: pathArray[1])) as? String, characteristic: pathArray[4], value: charValue, date: charDate)
                 
                 var shadowHist = history
                 shadowHist.append(historyItem)
@@ -99,6 +106,7 @@ class AccessoryFinderViewModel: ObservableObject {
                     shadowHist.removeFirst()
                 }
                 history = shadowHist
+                filterHistoryAndAssign()
                 
                 for indx in 0..<pathArray.count {
                     let name = pathArray[indx]
@@ -172,5 +180,20 @@ class AccessoryFinderViewModel: ObservableObject {
         _ = doIt(shadowRootItem, parent: nil)
         
         rootItem = shadowRootItem
+    }
+    
+    func filterHistoryAndAssign() {
+        guard historySearchTerm != "" else {
+            filteredHistory = history
+            return
+        }
+        filteredHistory = history.filter({ item in
+            return item.accessory.contains(historySearchTerm) ||
+            item.room.contains(historySearchTerm) ||
+            item.home.contains(historySearchTerm) ||
+            item.service.contains(historySearchTerm) ||
+            item.serviceName?.contains(historySearchTerm) ?? false ||
+            item.characteristic.contains(historySearchTerm)
+        })
     }
 }
